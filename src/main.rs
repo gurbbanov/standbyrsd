@@ -1,11 +1,13 @@
-use chrono::{self, Local};
-use iced::alignment::Vertical::Center;
+use chrono::prelude::*;
 use iced::font::{Family, Weight};
 use iced::time::{self, seconds};
 use iced::widget::canvas::Cache;
 use iced::widget::{Grid, button, center, column, container, responsive, row, text};
 use iced::window::{self, Id};
-use iced::{Alignment, Element, Font, Renderer, Settings, Size, Subscription, Task, Theme};
+use iced::{
+    Alignment, Color, Element, Font, Length, Renderer, Settings, Size, Subscription, Task, Theme,
+    color,
+};
 
 pub fn main() -> iced::Result {
     iced::daemon(Application::new, Application::update, Application::view)
@@ -60,6 +62,10 @@ impl Application {
             }
             Message::OpenMainWindow => {
                 let (id, task) = window::open(window::Settings {
+                    min_size: Some(Size {
+                        width: 600.0,
+                        height: 300.0,
+                    }),
                     size: Size {
                         width: 800.0,
                         height: 600.0,
@@ -70,7 +76,6 @@ impl Application {
 
                 self.main_window = Some(id);
 
-                // Task::none()
                 task.map(move |_| Message::WindowOpened(id))
             }
             Message::WindowOpened(id) => {
@@ -103,31 +108,112 @@ impl Application {
                 let columns = 7;
                 let spacing = 1.0;
                 let cell_width = (size.width - (columns as f32 - 1.0) * spacing) / columns as f32;
-                let cell_height = cell_width * 0.4;
-                let font_size = (size.width / 2.0).min(size.height) / 22.0;
+                let cell_height = cell_width * 0.6;
+                let font_size = (size.width / 2.0).min(size.height) / 20.0;
 
                 let mut grid: Grid<'_, Message, Theme, Renderer> =
                     Grid::new().columns(columns).spacing(spacing);
 
-                for i in 1..31 {
+                let weekdays = ["mo", "tu", "we", "th", "fr", "sa", "su"];
+
+                let first_day_of_month = weekday_to_number(
+                    &NaiveDate::from_ymd_opt(self.time.year(), self.time.month(), 1)
+                        .unwrap()
+                        .weekday(),
+                );
+
+                let last_day_of_month =
+                    NaiveDate::from_ymd_opt(self.time.year(), self.time.month() + 1, 1)
+                        .unwrap_or_else(|| {
+                            NaiveDate::from_ymd_opt(self.time.year() + 1, 1, 1).unwrap()
+                        })
+                        .pred_opt()
+                        .unwrap()
+                        .day() as usize;
+
+                for (ind, i) in weekdays.iter().enumerate() {
                     grid = grid.push(
-                        container(text(i.to_string()).size(font_size))
+                        container(text(*i).size(font_size).color(if ind == 5 || ind == 6 {
+                            color!(87, 87, 87)
+                        } else {
+                            Color::WHITE
+                        }))
+                        .width(cell_width)
+                        .height(cell_height)
+                        .center_x(cell_width)
+                        .center_y(cell_height),
+                    )
+                }
+
+                for _ in 0..first_day_of_month - 1 {
+                    grid = grid.push(container(""));
+                }
+
+                for i in 1..=last_day_of_month {
+                    if i == self.time.day() as usize {
+                        grid = grid.push(
+                            container(text(i.to_string()).size(font_size).color(Color::WHITE))
+                                .width(cell_width)
+                                .height(cell_height)
+                                .center_x(cell_width)
+                                .center_y(cell_height)
+                                .style(move |_| container::Style {
+                                    background: Some(color!(255, 0, 0).into()),
+                                    border: iced::Border {
+                                        radius: (cell_height / 2.0).into(),
+                                        width: 0.0,
+                                        color: iced::Color::TRANSPARENT,
+                                    },
+                                    ..Default::default()
+                                }),
+                        );
+                    } else if (i + first_day_of_month - 1 - (i + first_day_of_month - 1) / 7) % 6
+                        == 0
+                    {
+                        grid = grid.push(
+                            container(
+                                text(i.to_string())
+                                    .size(font_size)
+                                    .color(color!(87, 87, 87)),
+                            )
                             .height(cell_height)
                             .center_x(cell_width)
                             .center_y(cell_height),
-                    );
+                        );
+                    } else {
+                        grid = grid.push(
+                            container(text(i.to_string()).size(font_size).color(Color::WHITE))
+                                .height(cell_height)
+                                .center_x(cell_width)
+                                .center_y(cell_height),
+                        );
+                    }
                 }
 
                 row![
-                    center(column![
-                        text(format!("curr time: {}", self.time)),
-                        button("fullscreen").on_press(Message::ToggleFullscreen)
-                    ])
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-                    center(container(grid).width(size.width / 2.5))
+                    center(column![text(format!("curr time: {}", self.time)),])
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center)
+                        .width(size.width / 2.0),
+                    container(
+                        column![
+                            container(button("fullscreen").on_press(Message::ToggleFullscreen))
+                                .width(Length::Fill)
+                                .align_x(Alignment::End),
+                            center(column![
+                                text(format!(" {}", self.time.format("%B")))
+                                    .size(font_size * 2.0)
+                                    .color(color!(255, 0, 0)),
+                                container(grid).width(size.width / 2.2)
+                            ])
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                        ]
+                        .height(Length::Fill)
+                    )
+                    .width(size.width / 2.0)
+                    .height(Length::Fill)
                 ]
-                .align_y(Center)
                 .into()
             })
             .into(),
@@ -146,5 +232,18 @@ impl Default for Application {
             main_window: None,
             theme: Some(Theme::Moonfly),
         }
+    }
+}
+
+pub fn weekday_to_number(weekday: &Weekday) -> usize {
+    match weekday {
+        Weekday::Mon => 1,
+        Weekday::Tue => 2,
+        Weekday::Wed => 3,
+        Weekday::Thu => 4,
+        Weekday::Fri => 5,
+        Weekday::Sat => 6,
+        Weekday::Sun => 7,
+        _ => 7,
     }
 }
