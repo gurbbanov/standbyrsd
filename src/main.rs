@@ -1,12 +1,12 @@
 use chrono::prelude::*;
 use iced::font::{Family, Weight};
-use iced::time::{self, seconds};
-use iced::widget::canvas::Cache;
-use iced::widget::{Grid, button, center, column, container, responsive, row, text};
+use iced::time::{self, milliseconds};
+use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
+use iced::widget::{Grid, button, canvas, center, column, container, responsive, row, text};
 use iced::window::{self, Id};
 use iced::{
-    Alignment, Color, Element, Font, Length, Renderer, Settings, Size, Subscription, Task, Theme,
-    color,
+    Alignment, Color, Degrees, Element, Font, Length, Point, Radians, Renderer, Settings, Size,
+    Subscription, Task, Theme, Vector, color,
 };
 
 pub fn main() -> iced::Result {
@@ -36,9 +36,9 @@ struct Application {
 #[derive(Debug, Clone)]
 enum Message {
     Tick(chrono::DateTime<Local>),
-    ChangeTheme(Theme),
     OpenMainWindow,
     WindowOpened(Id),
+    ChangeTheme(Theme),
     ToggleFullscreen,
 }
 
@@ -53,10 +53,7 @@ impl Application {
                 if local_time != self.time {
                     self.time = local_time;
                 }
-                Task::none()
-            }
-            Message::ChangeTheme(theme) => {
-                self.theme = Some(theme);
+
                 Task::none()
             }
             Message::OpenMainWindow => {
@@ -70,12 +67,17 @@ impl Application {
                         height: 600.0,
                     },
                     position: window::Position::Centered,
+                    fullscreen: true,
                     ..Default::default()
                 });
 
                 self.main_window = Some(id);
 
                 task.map(move |_| Message::WindowOpened(id))
+            }
+            Message::ChangeTheme(theme) => {
+                self.theme = Some(theme);
+                Task::none()
             }
             Message::WindowOpened(id) => {
                 self.main_window = Some(id);
@@ -98,13 +100,13 @@ impl Application {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        time::every(seconds(1)).map(|_| Message::Tick(chrono::Local::now()))
+        time::every(milliseconds(16)).map(|_| Message::Tick(chrono::Local::now()))
     }
 
     fn view(&self, _id: Id) -> Element<'_, Message> {
         match self.main_window {
             Some(_id) => responsive(move |size| {
-                row![
+                container(row![
                     center(self.widgets[0].view(self.time, size))
                         .align_x(Alignment::Center)
                         .align_y(Alignment::Center)
@@ -118,7 +120,11 @@ impl Application {
                             .width(Length::Fill)
                             .height(Length::Fill),
                     ]
-                ]
+                ])
+                .style(|_| container::Style {
+                    background: Some(Color::BLACK.into()),
+                    ..Default::default()
+                })
                 .into()
             })
             .into(),
@@ -132,13 +138,8 @@ impl Default for Application {
         Application {
             time: chrono::Local::now(),
             widgets: vec![
-                Widget::Clock(ClockWidget {
-                    static_cache: Cache::default(),
-                    dynamic_cache: Cache::default(),
-                }),
-                Widget::Calendar(CalendarWidget {
-                    cache: Cache::default(),
-                }),
+                Widget::Clock(ClockWidget::default()),
+                Widget::Calendar(CalendarWidget::default()),
             ],
             fullscreen: false,
             main_window: None,
@@ -161,7 +162,7 @@ impl Widget {
     }
 }
 
-#[derive(Debug)]
+#[derive(Default)]
 struct CalendarWidget {
     cache: Cache,
 }
@@ -258,18 +259,229 @@ impl CalendarWidget {
     }
 }
 
-#[derive(Debug)]
+#[derive(Default)]
 struct ClockWidget {
-    static_cache: Cache,  //for storing static elements
-    dynamic_cache: Cache, //for storing dynamic elements
+    style: ClockStyle,
+    pub static_cache: Cache, //for storing static elements
+    dynamic_cache: Cache,    //for storing dynamic elements
 }
 
 impl ClockWidget {
-    fn view(&self, time: chrono::DateTime<Local>, size: Size) -> Element<'_, Message> {
-        center(text(format!("{}", time.date_naive())))
+    fn view(&self, _time: chrono::DateTime<Local>, _size: Size) -> Element<'_, Message> {
+        self.dynamic_cache.clear();
+        let canvas = canvas(self as &Self)
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+
+        container(canvas).into()
+    }
+}
+
+#[derive(Default)]
+enum ClockStyle {
+    Analog,
+    #[default]
+    Minimal,
+    Digital,
+}
+
+impl<Message> canvas::Program<Message> for ClockWidget {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        match self.style {
+            ClockStyle::Analog => {
+                let clock = self.dynamic_cache.draw(renderer, bounds.size(), |frame| {
+                    let palette = theme.extended_palette();
+
+                    let center = frame.center();
+                    let width = frame.width() / 2.0;
+
+                    let now = chrono::Local::now();
+                    let font_size = width * 0.6;
+
+                    // часы
+                    frame.fill_text(canvas::Text {
+                        content: format!("{:02}", now.hour()),
+                        position: Point {
+                            x: center.x - font_size * 0.8,
+                            y: center.y,
+                        },
+                        size: font_size.into(),
+                        color: palette.secondary.base.text,
+                        font: Font {
+                            family: Family::Name("SF Pro Rounded"),
+                            weight: Weight::Black,
+                            ..Font::DEFAULT
+                        },
+                        align_x: text::Alignment::Center,
+                        align_y: iced::alignment::Vertical::Center,
+                        ..Default::default()
+                    });
+
+                    // двоеточие мигающее
+                    let colon = if now.second() % 2 == 0 { ":" } else { " " };
+                    frame.fill_text(canvas::Text {
+                        content: colon.to_string(),
+                        position: center,
+                        size: font_size.into(),
+                        color: color!(255, 0, 0),
+                        font: Font {
+                            family: Family::Name("SF Pro Rounded"),
+                            weight: Weight::Black,
+                            ..Font::DEFAULT
+                        },
+                        align_x: text::Alignment::Center,
+                        align_y: iced::alignment::Vertical::Center,
+                        ..Default::default()
+                    });
+
+                    // минуты
+                    frame.fill_text(canvas::Text {
+                        content: format!("{:02}", now.minute()),
+                        position: Point {
+                            x: center.x + font_size * 0.8,
+                            y: center.y,
+                        },
+                        size: font_size.into(),
+                        color: palette.secondary.base.text,
+                        font: Font {
+                            family: Family::Name("SF Pro Rounded"),
+                            weight: Weight::Black,
+                            ..Font::DEFAULT
+                        },
+                        align_x: text::Alignment::Center,
+                        align_y: iced::alignment::Vertical::Center,
+                        ..Default::default()
+                    });
+                });
+
+                vec![clock]
+            }
+            ClockStyle::Minimal => {
+                let palette = theme.extended_palette();
+
+                let static_layer = self.static_cache.draw(renderer, bounds.size(), |frame| {
+                    let center = frame.center();
+
+                    frame.translate(Vector::new(center.x, center.y));
+
+                    let radius = frame.width().min(frame.height()) / 2.3;
+
+                    for hour in 1..=12 {
+                        let angle =
+                            Radians::from(hand_rotation(hour, 12)) - Radians::from(Degrees(90.0));
+                        let x = radius * angle.0.cos();
+                        let y = radius * angle.0.sin();
+
+                        frame.fill_text(canvas::Text {
+                            content: format!("{hour}"),
+                            size: (radius / 5.0).into(),
+                            position: Point::new(x * 0.82, y * 0.82),
+                            color: palette.secondary.strong.text,
+                            align_x: text::Alignment::Center,
+                            align_y: iced::alignment::Vertical::Center,
+                            font: Font {
+                                family: Family::Name("SF Pro Rounded"),
+                                weight: Weight::Black,
+                                ..Font::DEFAULT
+                            },
+                            ..canvas::Text::default()
+                        });
+                    }
+
+                    for tick in 0..60 {
+                        let angle = hand_rotation(tick, 60);
+                        let width = if tick % 5 == 0 { 3.0 } else { 1.0 };
+
+                        frame.with_save(|frame| {
+                            frame.rotate(angle);
+                            frame.fill(
+                                &Path::rectangle(
+                                    Point::new(0.0, radius - 15.0),
+                                    Size::new(width, 7.0),
+                                ),
+                                palette.secondary.strong.text,
+                            );
+                        });
+                    }
+                });
+
+                let dynamic_layer = self.dynamic_cache.draw(renderer, bounds.size(), |frame| {
+                    let now = chrono::Local::now();
+                    let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
+                    let center = frame.center();
+                    let radius = frame.width().min(frame.height()) / 2.3;
+
+                    let short_hand = Path::line(Point::ORIGIN, Point::new(0.0, -0.5 * radius));
+
+                    let long_hand = Path::line(Point::ORIGIN, Point::new(0.0, -0.8 * radius));
+
+                    let width = radius / 100.0;
+
+                    let thin_stroke = || -> Stroke {
+                        Stroke {
+                            width,
+                            style: stroke::Style::Solid(color!(240, 157, 10)),
+                            line_cap: LineCap::Round,
+                            ..Stroke::default()
+                        }
+                    };
+
+                    let wide_stroke = || -> Stroke {
+                        Stroke {
+                            width: width * 3.0,
+                            style: stroke::Style::Solid(palette.secondary.strong.text),
+                            line_cap: LineCap::Round,
+                            ..Stroke::default()
+                        }
+                    };
+
+                    frame.translate(Vector::new(center.x, center.y));
+
+                    let hour_hand_angle =
+                        Radians::from(hand_rotation(now.hour(), 12)) + minutes_portion;
+
+                    frame.with_save(|frame| {
+                        frame.rotate(hour_hand_angle);
+                        frame.stroke(&short_hand, wide_stroke());
+                    });
+
+                    frame.with_save(|frame| {
+                        frame.rotate(hand_rotation(now.minute(), 60));
+                        frame.stroke(&long_hand, wide_stroke());
+                    });
+
+                    frame.with_save(|frame| {
+                        let seconds =
+                            now.second() as f32 + now.nanosecond() as f32 / 1_000_000_000.0;
+
+                        let rotation = hand_rotation_sec(seconds, 60.0);
+
+                        frame.rotate(rotation);
+                        frame.stroke(&long_hand, thin_stroke());
+
+                        let rotate_factor = if rotation < 180.0 { 1.0 } else { -1.0 };
+
+                        frame.rotate(Degrees(-90.0 * rotate_factor));
+                    });
+                });
+
+                vec![static_layer, dynamic_layer]
+            }
+            ClockStyle::Digital => {
+                let clock = self.static_cache.draw(renderer, bounds.size(), |frame| {});
+
+                vec![clock]
+            }
+        }
     }
 }
 
@@ -283,4 +495,14 @@ pub fn weekday_to_number(weekday: &Weekday) -> usize {
         Weekday::Sat => 6,
         _ => 7,
     }
+}
+
+fn hand_rotation(n: u32, total: u32) -> Degrees {
+    let turns = n as f32 / total as f32;
+
+    Degrees(360.0 * turns)
+}
+
+fn hand_rotation_sec(value: f32, max: f32) -> iced::Radians {
+    iced::Radians(value / max * std::f32::consts::TAU)
 }
