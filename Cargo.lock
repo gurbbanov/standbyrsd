@@ -1231,6 +1231,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced_anim"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea7e0f5f848b041abf2907eda96a4c21cbd5c3aee4ade434bd650d898f39e95b"
+dependencies = [
+ "iced_core",
+]
+
+[[package]]
 name = "iced_core"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2787,6 +2796,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "iced",
+ "iced_anim",
 ]
 
 [[package]]

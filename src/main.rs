@@ -1,15 +1,20 @@
 use chrono::prelude::*;
+use iced::advanced::Renderer as AdvancedRenderer;
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::renderer;
+use iced::advanced::widget::{self};
+use iced::advanced::{Clipboard, Shell};
 use iced::font::{Family, Weight};
+use iced::mouse;
 use iced::time::{self, milliseconds};
 use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
-use iced::widget::{
-    Grid, button, canvas, center, column, container, responsive, row, scrollable, stack, text,
-};
+use iced::widget::{Grid, button, canvas, center, column, container, responsive, row, stack, text};
 use iced::window::{self, Id};
 use iced::{
-    Alignment, Color, Degrees, Element, Font, Length, Point, Radians, Renderer, Settings, Size,
-    Subscription, Task, Theme, Vector, color,
+    Alignment, Color, Degrees, Element, Event, Font, Length, Point, Radians, Rectangle, Renderer,
+    Settings, Size, Subscription, Task, Theme, Vector, color,
 };
+use std::time::{Duration, Instant};
 
 pub fn main() -> iced::Result {
     iced::daemon(Application::new, Application::update, Application::view)
@@ -28,12 +33,53 @@ pub fn main() -> iced::Result {
         .run()
 }
 
+const PAGE_COUNT: usize = 2;
+const SNAP_THRESHOLD: f32 = 0.125;
+const IDLE_MS: u64 = 16;
+const SNAP_DURATION_MS: u64 = 420;
+
+#[derive(Debug, Clone)]
+enum DragState {
+    Idle,
+    Active {
+        offset_px: f32,
+        velocity: f32,
+        last_event: Instant,
+    },
+    Snapping {
+        start_offset: f32,
+        end_offset: f32,
+        velocity: f32,
+        started_at: Instant,
+    },
+}
+
+impl DragState {
+    fn is_snapping_done(&self) -> bool {
+        if let DragState::Snapping { started_at, .. } = self {
+            started_at.elapsed().as_millis() >= SNAP_DURATION_MS as u128
+        } else {
+            false
+        }
+    }
+}
+
+fn ease_spring(t: f32, v0: f32) -> f32 {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let hermite = 3.0 * t2 - 2.0 * t3;
+    let velocity_term = v0 * t * (t - 1.0) * (t - 1.0);
+    (hermite + velocity_term).clamp(0.0, 1.0)
+}
+
 struct Application {
     time: chrono::DateTime<Local>,
-    widgets: Vec<Widget>,
+    widgets: Vec<AppWidget>,
     fullscreen: bool,
     main_window: Option<window::Id>,
-    theme: Option<Theme>,
+    current_page: usize,
+    page_width: f32,
+    drag: DragState,
 }
 
 #[derive(Debug, Clone)]
@@ -41,13 +87,46 @@ enum Message {
     Tick(chrono::DateTime<Local>),
     OpenMainWindow,
     WindowOpened(Id),
-    ChangeTheme(Theme),
     ToggleFullscreen,
+    DragDelta(f32),
+    SnapTick(Instant),
+    AnimTick(Instant),
+    UpdatePageWidth(f32),
 }
 
 impl Application {
     fn new() -> (Self, Task<Message>) {
         (Self::default(), Task::done(Message::OpenMainWindow))
+    }
+
+    fn try_snap(&mut self) {
+        if let DragState::Active {
+            offset_px,
+            velocity,
+            ..
+        } = self.drag.clone()
+        {
+            let pw = self.page_width;
+            let ratio = offset_px / pw;
+            let from = self.current_page;
+            let abs_now = -(from as f32) * pw + offset_px;
+
+            let (target_page, abs_end) = if ratio < -SNAP_THRESHOLD && from + 1 < PAGE_COUNT {
+                (from + 1, -((from + 1) as f32) * pw)
+            } else if ratio > SNAP_THRESHOLD && from > 0 {
+                (from - 1, -((from - 1) as f32) * pw)
+            } else {
+                (from, -(from as f32) * pw)
+            };
+
+            self.current_page = target_page;
+            self.drag = DragState::Snapping {
+                start_offset: abs_now,
+                end_offset: abs_end,
+                velocity,
+                started_at: Instant::now(),
+            };
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -56,7 +135,6 @@ impl Application {
                 if local_time != self.time {
                     self.time = local_time;
                 }
-
                 Task::none()
             }
             Message::OpenMainWindow => {
@@ -78,10 +156,6 @@ impl Application {
 
                 task.map(move |_| Message::WindowOpened(id))
             }
-            Message::ChangeTheme(theme) => {
-                self.theme = Some(theme);
-                Task::none()
-            }
             Message::WindowOpened(id) => {
                 self.main_window = Some(id);
                 Task::none()
@@ -99,60 +173,161 @@ impl Application {
                     Task::none()
                 }
             }
+            Message::DragDelta(dx) => {
+                let pw = self.page_width;
+                let prev = match &self.drag {
+                    DragState::Active { offset_px, .. } => *offset_px,
+                    DragState::Snapping {
+                        start_offset,
+                        end_offset,
+                        velocity,
+                        started_at,
+                    } => {
+                        let elapsed = started_at.elapsed().as_secs_f32();
+                        let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
+                        let dist = end_offset - start_offset;
+                        let v0 = if dist.abs() > 0.001 {
+                            velocity / dist
+                        } else {
+                            0.0
+                        };
+                        let abs = start_offset + dist * ease_spring(t, v0);
+                        abs - (-(self.current_page as f32) * pw)
+                    }
+                    DragState::Idle => 0.0,
+                };
+                let raw = prev + dx;
+                let max_drag = if self.current_page > 0 { pw } else { 0.0 };
+                let min_drag = if self.current_page + 1 < PAGE_COUNT {
+                    -pw
+                } else {
+                    0.0
+                };
+                let clamped = raw.clamp(min_drag, max_drag);
+                self.drag = DragState::Active {
+                    offset_px: clamped,
+                    velocity: dx,
+                    last_event: Instant::now(),
+                };
+
+                if dx.abs() < 1.5 {
+                    self.try_snap();
+                }
+
+                Task::none()
+            }
+            Message::SnapTick(_) => {
+                if let DragState::Active { last_event, .. } = self.drag.clone() {
+                    if last_event.elapsed() >= Duration::from_millis(IDLE_MS) {
+                        self.try_snap();
+                    }
+                }
+                Task::none()
+            }
+            Message::AnimTick(_) => {
+                if self.drag.is_snapping_done() {
+                    self.drag = DragState::Idle;
+                }
+                Task::none()
+            }
+            Message::UpdatePageWidth(w) => {
+                self.page_width = w;
+                Task::none()
+            }
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        time::every(milliseconds(16)).map(|_| Message::Tick(chrono::Local::now()))
+        let clock = time::every(milliseconds(16)).map(|_| Message::Tick(chrono::Local::now()));
+        let snap_idle = if matches!(self.drag, DragState::Active { .. }) {
+            time::every(Duration::from_millis(16)).map(Message::SnapTick)
+        } else {
+            Subscription::none()
+        };
+        let anim = if matches!(self.drag, DragState::Snapping { .. }) {
+            time::every(Duration::from_millis(16)).map(Message::AnimTick)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([clock, snap_idle, anim])
     }
 
     fn view(&self, _id: Id) -> Element<'_, Message> {
         match self.main_window {
             Some(_id) => responsive(move |size| {
-                scrollable(row![
-                    container(responsive(move |size| {
-                        container(row![
-                            center(self.widgets[0].view(self.time, size))
-                                .align_x(Alignment::Center)
-                                .align_y(Alignment::Center)
-                                .width(Length::Fill)
-                                .height(Length::Fill),
-                            column![
-                                container(button("fullscreen").on_press(Message::ToggleFullscreen))
-                                    .width(Length::Fill)
-                                    .align_x(Alignment::End),
-                                center(self.widgets[1].view(self.time, size))
-                                    .width(Length::Fill)
-                                    .height(Length::Fill),
-                            ]
-                        ])
-                        .style(|_| container::Style {
-                            background: Some(Color::BLACK.into()),
-                            ..Default::default()
-                        })
-                        .into()
-                    }))
-                    .width(size.width)
-                    .height(size.height),
-                    container(responsive(move |size| {
-                        container(text("second page").size(size.width * 0.1))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .into()
-                    }))
-                    .width(size.width)
-                    .height(size.height),
-                ])
-                .direction(scrollable::Direction::Horizontal(
-                    scrollable::Scrollbar::hidden(),
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+                let total_offset: f32 = match &self.drag {
+                    DragState::Idle => -(self.current_page as f32) * size.width,
+                    DragState::Active { offset_px, .. } => {
+                        -(self.current_page as f32) * size.width + offset_px
+                    }
+                    DragState::Snapping {
+                        start_offset,
+                        end_offset,
+                        velocity,
+                        started_at,
+                    } => {
+                        let elapsed = started_at.elapsed().as_secs_f32();
+                        let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
+                        let dist = end_offset - start_offset;
+                        let v0 = if dist.abs() > 0.001 {
+                            velocity / dist
+                        } else {
+                            0.0
+                        };
+                        start_offset + dist * ease_spring(t, v0)
+                    }
+                };
+
+                slide_pages(
+                    total_offset,
+                    size.width,
+                    size.height,
+                    self.page0(size),
+                    self.page1(size),
+                )
             })
             .into(),
             None => container(text("window is closed")).into(),
         }
+    }
+
+    fn page0(&self, size: Size) -> Element<'_, Message> {
+        container(responsive(move |size| {
+            container(row![
+                center(self.widgets[0].view(self.time, size))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+                column![
+                    container(button("fullscreen").on_press(Message::ToggleFullscreen))
+                        .width(Length::Fill)
+                        .align_x(Alignment::End),
+                    center(self.widgets[1].view(self.time, size))
+                        .width(Length::Fill)
+                        .height(Length::Fill),
+                ]
+            ])
+            .style(|_| container::Style {
+                background: Some(Color::BLACK.into()),
+                ..Default::default()
+            })
+            .into()
+        }))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+
+    fn page1(&self, _size: Size) -> Element<'_, Message> {
+        container(center(text("second page").size(48).color(Color::WHITE)))
+            .style(|_| container::Style {
+                background: Some(Color::BLACK.into()),
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
@@ -161,26 +336,210 @@ impl Default for Application {
         Application {
             time: chrono::Local::now(),
             widgets: vec![
-                Widget::Clock(ClockWidget::default()),
-                Widget::Calendar(CalendarWidget),
+                AppWidget::Clock(ClockWidget::default()),
+                AppWidget::Calendar(CalendarWidget),
             ],
             fullscreen: false,
             main_window: None,
-            theme: Some(Theme::Moonfly),
+            current_page: 0,
+            page_width: 800.0,
+            drag: DragState::Idle,
         }
     }
 }
 
-enum Widget {
+struct SlidePages<'a, M, T, R> {
+    offset: f32,
+    page_width: f32,
+    page_height: f32,
+    children: Vec<Element<'a, M, T, R>>,
+}
+
+fn slide_pages<'a>(
+    offset: f32,
+    page_width: f32,
+    page_height: f32,
+    page0: Element<'a, Message>,
+    page1: Element<'a, Message>,
+) -> Element<'a, Message> {
+    SlidePages {
+        offset,
+        page_width,
+        page_height,
+        children: vec![page0, page1],
+    }
+    .into()
+}
+
+impl<'a> From<SlidePages<'a, Message, Theme, Renderer>> for Element<'a, Message, Theme, Renderer> {
+    fn from(w: SlidePages<'a, Message, Theme, Renderer>) -> Self {
+        Element::new(w)
+    }
+}
+
+impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
+    for SlidePages<'a, Message, Theme, Renderer>
+{
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let pw = self.page_width;
+        let ph = self.page_height;
+        let child_limits = layout::Limits::new(Size::ZERO, Size::new(pw, ph));
+
+        let children: Vec<layout::Node> = self
+            .children
+            .iter_mut()
+            .enumerate()
+            .map(|(i, child)| {
+                let mut node =
+                    child
+                        .as_widget_mut()
+                        .layout(&mut tree.children[i], renderer, &child_limits);
+                node = node.translate(Vector::new(i as f32 * pw, 0.0));
+                node
+            })
+            .collect();
+
+        layout::Node::with_children(
+            limits.resolve(Length::Fill, Length::Fill, Size::new(pw, ph)),
+            children,
+        )
+    }
+
+    fn children(&self) -> Vec<widget::Tree> {
+        self.children.iter().map(|c| widget::Tree::new(c)).collect()
+    }
+
+    fn diff(&self, tree: &mut widget::Tree) {
+        tree.diff_children(&self.children);
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
+
+        renderer.with_layer(bounds, |renderer: &mut Renderer| {
+            renderer.with_translation(Vector::new(self.offset, 0.0), |renderer: &mut Renderer| {
+                for (i, (child, child_layout)) in
+                    self.children.iter().zip(layout.children()).enumerate()
+                {
+                    child.as_widget().draw(
+                        &tree.children[i],
+                        renderer,
+                        theme,
+                        style,
+                        child_layout,
+                        cursor,
+                        viewport,
+                    );
+                }
+            });
+        });
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
+
+        shell.publish(Message::UpdatePageWidth(bounds.width));
+
+        if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
+            if cursor.is_over(bounds) {
+                let dx = match delta {
+                    mouse::ScrollDelta::Pixels { x, .. } => *x * 2.0,
+                    mouse::ScrollDelta::Lines { x, .. } => *x * 80.0,
+                };
+                if dx.abs() > 0.3 {
+                    shell.publish(Message::DragDelta(dx));
+                    return;
+                }
+            }
+        }
+
+        let translated_cursor = match cursor {
+            mouse::Cursor::Available(pos) => {
+                mouse::Cursor::Available(Point::new(pos.x - self.offset, pos.y))
+            }
+            other => other,
+        };
+
+        for (i, (child, child_layout)) in
+            self.children.iter_mut().zip(layout.children()).enumerate()
+        {
+            child.as_widget_mut().update(
+                &mut tree.children[i],
+                event,
+                child_layout,
+                translated_cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &widget::Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.children
+            .iter()
+            .zip(layout.children())
+            .enumerate()
+            .map(|(i, (child, child_layout))| {
+                child.as_widget().mouse_interaction(
+                    &tree.children[i],
+                    child_layout,
+                    cursor,
+                    viewport,
+                    renderer,
+                )
+            })
+            .max()
+            .unwrap_or_default()
+    }
+}
+
+enum AppWidget {
     Calendar(CalendarWidget),
     Clock(ClockWidget),
 }
 
-impl Widget {
+impl AppWidget {
     pub fn view(&self, time: chrono::DateTime<Local>, size: Size) -> Element<'_, Message> {
         match self {
-            Widget::Clock(w) => w.view(time, size),
-            Widget::Calendar(w) => w.view(time, size),
+            AppWidget::Clock(w) => w.view(time, size),
+            AppWidget::Calendar(w) => w.view(time, size),
         }
     }
 }
@@ -494,7 +853,7 @@ impl<Message> canvas::Program<Message> for Hands {
 
             // минутная стрелка
             frame.with_save(|frame| {
-                let minute_angle = hand_rotation(now.minute(), 60);
+                let minute_angle = hand_rotation(now.minute() * 15 + now.second() / 4, 900);
 
                 frame.with_save(|f| {
                     f.rotate(minute_angle);
@@ -522,7 +881,8 @@ impl<Message> canvas::Program<Message> for Hands {
             // секундная стрелка
             frame.with_save(|frame| {
                 let seconds = now.second() as f32 + now.nanosecond() as f32 / 1_000_000_000.0;
-                let rotation = hand_rotation_sec(seconds, 60.0);
+                let rotation =
+                    hand_rotation_sec(seconds, 60.0).0 - std::f32::consts::FRAC_PI_2 * 2.0;
 
                 frame.with_save(|f| {
                     f.rotate(rotation);
