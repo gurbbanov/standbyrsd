@@ -2,7 +2,9 @@ use chrono::prelude::*;
 use iced::font::{Family, Weight};
 use iced::time::{self, milliseconds};
 use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
-use iced::widget::{Grid, button, canvas, center, column, container, responsive, row, stack, text};
+use iced::widget::{
+    Grid, button, canvas, center, column, container, responsive, row, scrollable, stack, text,
+};
 use iced::window::{self, Id};
 use iced::{
     Alignment, Color, Degrees, Element, Font, Length, Point, Radians, Renderer, Settings, Size,
@@ -107,25 +109,45 @@ impl Application {
     fn view(&self, _id: Id) -> Element<'_, Message> {
         match self.main_window {
             Some(_id) => responsive(move |size| {
-                container(row![
-                    center(self.widgets[0].view(self.time, size))
-                        .align_x(Alignment::Center)
-                        .align_y(Alignment::Center)
-                        .width(Length::Fill)
-                        .height(Length::Fill),
-                    column![
-                        container(button("fullscreen").on_press(Message::ToggleFullscreen))
+                scrollable(row![
+                    container(responsive(move |size| {
+                        container(row![
+                            center(self.widgets[0].view(self.time, size))
+                                .align_x(Alignment::Center)
+                                .align_y(Alignment::Center)
+                                .width(Length::Fill)
+                                .height(Length::Fill),
+                            column![
+                                container(button("fullscreen").on_press(Message::ToggleFullscreen))
+                                    .width(Length::Fill)
+                                    .align_x(Alignment::End),
+                                center(self.widgets[1].view(self.time, size))
+                                    .width(Length::Fill)
+                                    .height(Length::Fill),
+                            ]
+                        ])
+                        .style(|_| container::Style {
+                            background: Some(Color::BLACK.into()),
+                            ..Default::default()
+                        })
+                        .into()
+                    }))
+                    .width(size.width)
+                    .height(size.height),
+                    container(responsive(move |size| {
+                        container(text("second page").size(size.width * 0.1))
                             .width(Length::Fill)
-                            .align_x(Alignment::End),
-                        center(self.widgets[1].view(self.time, size))
-                            .width(Length::Fill)
-                            .height(Length::Fill),
-                    ]
+                            .height(Length::Fill)
+                            .into()
+                    }))
+                    .width(size.width)
+                    .height(size.height),
                 ])
-                .style(|_| container::Style {
-                    background: Some(Color::BLACK.into()),
-                    ..Default::default()
-                })
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::hidden(),
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
                 .into()
             })
             .into(),
@@ -444,7 +466,7 @@ impl<Message> canvas::Program<Message> for Hands {
 
             let thin_stroke = || -> Stroke {
                 Stroke {
-                    width,
+                    width: width,
                     style: stroke::Style::Solid(color!(240, 157, 10)),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
@@ -453,7 +475,7 @@ impl<Message> canvas::Program<Message> for Hands {
 
             let wide_stroke = || -> Stroke {
                 Stroke {
-                    width: width * 3.0,
+                    width: width * 5.0,
                     style: stroke::Style::Solid(palette.secondary.strong.text),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
@@ -466,25 +488,6 @@ impl<Message> canvas::Program<Message> for Hands {
 
             // часовая стрелка
             frame.with_save(|frame| {
-                frame.with_save(|f| {
-                    f.rotate(hour_hand_angle);
-                    f.translate(Vector::new(0.0, 2.0));
-                    f.stroke(
-                        &hour_hand,
-                        Stroke {
-                            width: width * 3.0 * 1.2,
-                            style: stroke::Style::Solid(Color {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                                a: 0.4,
-                            }),
-                            line_cap: LineCap::Round,
-                            ..Stroke::default()
-                        },
-                    );
-                });
-
                 frame.rotate(hour_hand_angle);
                 frame.stroke(&hour_hand, wide_stroke());
             });
@@ -495,11 +498,11 @@ impl<Message> canvas::Program<Message> for Hands {
 
                 frame.with_save(|f| {
                     f.rotate(minute_angle);
-                    f.translate(Vector::new(0.0, 2.0));
+                    f.translate(Vector::new(-2.0, 0.0));
                     f.stroke(
                         &minute_hand,
                         Stroke {
-                            width: width * 4.0,
+                            width: width * 6.5,
                             style: stroke::Style::Solid(Color {
                                 r: 0.0,
                                 g: 0.0,
@@ -523,11 +526,11 @@ impl<Message> canvas::Program<Message> for Hands {
 
                 frame.with_save(|f| {
                     f.rotate(rotation);
-                    f.translate(Vector::new(0.0, 2.0));
+                    f.translate(Vector::new(2.0, 2.0));
                     f.stroke(
-                        &minute_hand,
+                        &second_hand,
                         Stroke {
-                            width: width,
+                            width: width * 1.2,
                             style: stroke::Style::Solid(Color {
                                 r: 0.0,
                                 g: 0.0,
@@ -542,9 +545,6 @@ impl<Message> canvas::Program<Message> for Hands {
 
                 frame.rotate(rotation);
                 frame.stroke(&second_hand, thin_stroke());
-
-                let rotate_factor = if rotation < 180.0 { 1.0 } else { -1.0 };
-                frame.rotate(Degrees(-90.0 * rotate_factor));
             });
         });
 
@@ -610,9 +610,9 @@ impl<Message> canvas::Program<Message> for ClockFrame {
             for tick in 0..60 {
                 let angle = hand_rotation(tick, 60);
                 let width = if tick % 5 == 0 {
-                    radius * 0.012
+                    radius * 0.016
                 } else {
-                    radius * 0.0055
+                    radius * 0.0095
                 };
 
                 frame.with_save(|frame| {
