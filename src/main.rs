@@ -4,6 +4,7 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::{self};
 use iced::advanced::{Clipboard, Shell};
+use iced::border::Radius;
 use iced::font::{Family, Weight};
 use iced::mouse;
 use iced::time::{self, milliseconds};
@@ -34,7 +35,7 @@ pub fn main() -> iced::Result {
 }
 
 const PAGE_COUNT: usize = 2;
-const SNAP_THRESHOLD: f32 = 0.125;
+const SNAP_THRESHOLD: f32 = 0.025;
 const IDLE_MS: u64 = 16;
 const SNAP_DURATION_MS: u64 = 420;
 
@@ -74,7 +75,8 @@ fn ease_spring(t: f32, v0: f32) -> f32 {
 
 struct Application {
     time: chrono::DateTime<Local>,
-    widgets: Vec<AppWidget>,
+    widgets_1: Vec<AppWidget>,
+    widgets_2: Vec<AppWidget>,
     fullscreen: bool,
     main_window: Option<window::Id>,
     current_page: usize,
@@ -294,7 +296,7 @@ impl Application {
     fn page0(&self, size: Size) -> Element<'_, Message> {
         container(responsive(move |size| {
             container(row![
-                center(self.widgets[0].view(self.time, size))
+                center(self.widgets_1[0].view(self.time, size))
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center)
                     .width(Length::Fill)
@@ -303,7 +305,7 @@ impl Application {
                     container(button("fullscreen").on_press(Message::ToggleFullscreen))
                         .width(Length::Fill)
                         .align_x(Alignment::End),
-                    center(self.widgets[1].view(self.time, size))
+                    center(self.widgets_1[1].view(self.time, size))
                         .width(Length::Fill)
                         .height(Length::Fill),
                 ]
@@ -320,14 +322,16 @@ impl Application {
     }
 
     fn page1(&self, _size: Size) -> Element<'_, Message> {
-        container(center(text("second page").size(48).color(Color::WHITE)))
-            .style(|_| container::Style {
-                background: Some(Color::BLACK.into()),
-                ..Default::default()
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        container(responsive(move |size| {
+            self.widgets_2[0].view(self.time, size)
+        }))
+        .style(|_| container::Style {
+            background: Some(Color::BLACK.into()),
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 }
 
@@ -335,10 +339,13 @@ impl Default for Application {
     fn default() -> Self {
         Application {
             time: chrono::Local::now(),
-            widgets: vec![
+            widgets_1: vec![
                 AppWidget::Clock(ClockWidget::default()),
                 AppWidget::Calendar(CalendarWidget),
             ],
+            widgets_2: vec![AppWidget::Clock(ClockWidget::new(
+                ClockStyle::AnalogueFull(AnalogueClockFull::default()),
+            ))],
             fullscreen: false,
             main_window: None,
             current_page: 0,
@@ -652,37 +659,45 @@ struct ClockWidget {
 impl Default for ClockWidget {
     fn default() -> Self {
         Self {
-            style: ClockStyle::Minimal(MinimalClock::default()),
+            style: ClockStyle::AnalogueHalf(AnalogueClockHalf::default()),
         }
     }
 }
 
 impl ClockWidget {
+    fn new(style: ClockStyle) -> Self {
+        Self { style }
+    }
+
     fn view(&self, _time: chrono::DateTime<Local>, _size: Size) -> Element<'_, Message> {
         self.style.view()
     }
 }
 
 enum ClockStyle {
-    Digital(DigitalClock),
-    Minimal(MinimalClock),
+    DigitalHalf(DigitalClockHalf),
+    AnalogueHalf(AnalogueClockHalf),
+    MinimalHalf(MinimalClockHalf),
+    AnalogueFull(AnalogueClockFull),
 }
 
 impl ClockStyle {
     fn view(&self) -> Element<'_, Message> {
         match self {
-            ClockStyle::Digital(clock) => clock.view(),
-            ClockStyle::Minimal(clock) => clock.view(),
+            ClockStyle::DigitalHalf(clock) => clock.view(),
+            ClockStyle::AnalogueHalf(clock) => clock.view(),
+            ClockStyle::MinimalHalf(clock) => clock.view(),
+            ClockStyle::AnalogueFull(clock) => clock.view(),
         }
     }
 }
 
 #[derive(Default)]
-struct DigitalClock {
+struct DigitalClockHalf {
     cache: Cache,
 }
 
-impl DigitalClock {
+impl DigitalClockHalf {
     fn view(&self) -> Element<'_, Message> {
         self.cache.clear();
         canvas(self as &Self)
@@ -692,7 +707,7 @@ impl DigitalClock {
     }
 }
 
-impl<Message> canvas::Program<Message> for DigitalClock {
+impl<Message> canvas::Program<Message> for DigitalClockHalf {
     type State = ();
 
     fn draw(
@@ -773,12 +788,12 @@ impl<Message> canvas::Program<Message> for DigitalClock {
 }
 
 #[derive(Default)]
-struct MinimalClock {
+struct AnalogueClockHalf {
     hands: Hands,
-    clock_frame: ClockFrame,
+    clock_frame: ClockFrameAnalogueHalf,
 }
 
-impl MinimalClock {
+impl AnalogueClockHalf {
     fn view(&self) -> Element<'_, Message> {
         stack![self.clock_frame.view(), self.hands.view()].into()
     }
@@ -920,11 +935,11 @@ impl<Message> canvas::Program<Message> for Hands {
 }
 
 #[derive(Default)]
-struct ClockFrame {
+struct ClockFrameAnalogueHalf {
     cache: Cache,
 }
 
-impl ClockFrame {
+impl ClockFrameAnalogueHalf {
     fn view(&self) -> Element<'_, Message> {
         canvas(self as &Self)
             .width(Length::Fill)
@@ -933,7 +948,7 @@ impl ClockFrame {
     }
 }
 
-impl<Message> canvas::Program<Message> for ClockFrame {
+impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
     type State = ();
 
     fn draw(
@@ -951,7 +966,7 @@ impl<Message> canvas::Program<Message> for ClockFrame {
 
             frame.translate(Vector::new(center.x, center.y));
 
-            let radius = frame.width().min(frame.height()) / 2.3;
+            let radius = frame.width().min(frame.height()) / 2.4;
 
             for hour in 1..=12 {
                 let angle = Radians::from(hand_rotation(hour, 12)) - Radians::from(Degrees(90.0));
@@ -974,22 +989,328 @@ impl<Message> canvas::Program<Message> for ClockFrame {
                 });
             }
 
+            let mut color;
+
             for tick in 0..60 {
                 let angle = hand_rotation(tick, 60);
                 let width = if tick % 5 == 0 {
+                    color = palette.secondary.strong.text;
                     radius * 0.016
                 } else {
+                    color = palette.secondary.base.color;
                     radius * 0.0095
                 };
 
                 frame.with_save(|frame| {
                     frame.rotate(angle);
                     frame.fill(
-                        &Path::rectangle(Point::new(0.0, radius), Size::new(width, width * 6.0)),
+                        &Path::rounded_rectangle(
+                            Point::new(0.0, radius),
+                            Size::new(width, width * 6.0),
+                            Radius::new(width / 2.0),
+                        ),
+                        color,
+                    );
+                });
+            }
+        });
+
+        vec![static_layer]
+    }
+}
+
+#[derive(Default)]
+struct MinimalClockHalf {
+    hands: Hands,
+    clock_frame: ClockFrameMinimalHalf,
+}
+
+impl MinimalClockHalf {
+    fn view(&self) -> Element<'_, Message> {
+        stack![self.clock_frame.view(), self.hands.view()].into()
+    }
+}
+
+#[derive(Default)]
+struct ClockFrameMinimalHalf {
+    cache: Cache,
+}
+
+impl ClockFrameMinimalHalf {
+    fn view(&self) -> Element<'_, Message> {
+        canvas(self as &Self)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+}
+
+impl<Message> canvas::Program<Message> for ClockFrameMinimalHalf {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let palette = theme.extended_palette();
+
+        let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
+            let center = frame.center();
+
+            frame.translate(Vector::new(center.x, center.y));
+
+            let radius = frame.width().min(frame.height()) / 2.9;
+
+            for hour in 1..=12 {
+                let angle = Radians::from(hand_rotation(hour, 12)) - Radians::from(Degrees(90.0));
+
+                let width = radius * 0.055;
+
+                frame.with_save(|frame| {
+                    frame.rotate(angle);
+                    frame.fill(
+                        &Path::rounded_rectangle(
+                            Point::new(0.0, radius),
+                            Size::new(width, width * 5.0),
+                            Radius::new(width / 2.0),
+                        ),
                         palette.secondary.strong.text,
                     );
                 });
             }
+        });
+
+        vec![static_layer]
+    }
+}
+
+#[derive(Default)]
+struct AnalogueClockFull {
+    hands: Hands,
+    clock_frame: ClockFrameAnalogueFull,
+}
+
+impl AnalogueClockFull {
+    fn view(&self) -> Element<'_, Message> {
+        stack![self.clock_frame.view(), self.hands.view()].into()
+    }
+}
+
+#[derive(Default)]
+struct ClockFrameAnalogueFull {
+    cache: Cache,
+}
+
+impl ClockFrameAnalogueFull {
+    fn view(&self) -> Element<'_, Message> {
+        canvas(self as &Self)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+}
+
+impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let palette = theme.extended_palette();
+
+        let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
+            let padding = 70.0;
+            let inner_padding_hour = 250.0;
+            let inner_padding_min = 120.0;
+
+            let top_left = Point::new(padding, padding);
+            let top_right = Point::new(frame.width() - padding, padding);
+            let bottom_right = Point::new(frame.width() - padding, frame.height() - padding);
+            let bottom_left = Point::new(padding, frame.height() - padding);
+
+            let center = frame.center();
+
+            let doli_minutes = vec![
+                0.1739, 0.2363, 0.2854, 0.3270, 0.3913, 0.4197, 0.4461, 0.4707, 0.5293, 0.5539,
+                0.5803, 0.6087, 0.6730, 0.7146, 0.7637, 0.8261,
+            ];
+
+            let doli_hours = vec![0.0907, 0.3611, 0.5, 0.6411, 0.9093];
+
+            let width = frame.width() - padding * 2.0;
+            let height = frame.height() - padding * 2.0;
+
+            frame.with_save(|frame| {
+                //upper side
+                for i in &doli_minutes {
+                    let point = Point::new(top_left.x + width * i, top_left.y);
+
+                    let dx = center.x - point.x;
+                    let dy = center.y - point.y;
+
+                    let end_point = Point::new(
+                        point.x + (inner_padding_min - point.y) * (dx / dy),
+                        inner_padding_min,
+                    );
+
+                    let line = Path::line(point, end_point);
+
+                    frame.stroke(
+                        &line,
+                        Stroke::default()
+                            .with_color(palette.secondary.base.color)
+                            .with_width(4.0)
+                            .with_line_cap(LineCap::Round),
+                    );
+                }
+
+                for i in &doli_hours {
+                    let point = Point::new(top_left.x + width * i, top_left.y);
+
+                    let dx = center.x - point.x;
+                    let dy = center.y - point.y;
+
+                    let end_point = if *i == 0.5 {
+                        Point::new(point.x, inner_padding_min)
+                    } else {
+                        Point::new(
+                            point.x + (inner_padding_hour - point.y) * (dx / dy),
+                            inner_padding_hour,
+                        )
+                    };
+
+                    let line = Path::line(point, end_point);
+
+                    frame.stroke(
+                        &line,
+                        Stroke::default()
+                            .with_color(palette.secondary.strong.text)
+                            .with_width(10.0)
+                            .with_line_cap(LineCap::Round),
+                    );
+                }
+
+                //bottom side
+                for i in &doli_minutes {
+                    let point = Point::new(bottom_left.x + width * i, bottom_left.y);
+
+                    let dx = center.x - point.x;
+                    let dy = center.y - point.y;
+
+                    let end_point = Point::new(
+                        point.x + ((frame.height() - inner_padding_min) - point.y) * (dx / dy),
+                        frame.height() - inner_padding_min,
+                    );
+
+                    let line = Path::line(point, end_point);
+
+                    frame.stroke(
+                        &line,
+                        Stroke::default()
+                            .with_color(palette.secondary.base.color)
+                            .with_width(4.0)
+                            .with_line_cap(LineCap::Round),
+                    );
+                }
+
+                for i in &doli_hours {
+                    let point = Point::new(bottom_left.x + width * i, bottom_left.y);
+
+                    let dx = center.x - point.x;
+                    let dy = center.y - point.y;
+
+                    let end_point = if *i == 0.5 {
+                        Point::new(point.x, frame.height() - inner_padding_min)
+                    } else {
+                        Point::new(
+                            point.x + ((frame.height() - inner_padding_hour) - point.y) * (dx / dy),
+                            frame.height() - inner_padding_hour,
+                        )
+                    };
+
+                    let line = Path::line(point, end_point);
+
+                    frame.stroke(
+                        &line,
+                        Stroke::default()
+                            .with_color(palette.secondary.strong.text)
+                            .with_width(10.0)
+                            .with_line_cap(LineCap::Round),
+                    );
+                }
+
+                //left side
+                for i in 1..10 {
+                    let point = Point::new(top_left.x, top_left.y + height * 0.1 * i as f32);
+
+                    let dx = center.x - point.x;
+                    let dy = center.y - point.y;
+
+                    let end_point = if i == 5 {
+                        Point::new(point.x + inner_padding_min, point.y)
+                    } else {
+                        Point::new(
+                            inner_padding_min,
+                            point.y + (inner_padding_min - point.x) * (dy / dx),
+                        )
+                    };
+
+                    let line = Path::line(point, end_point);
+
+                    frame.stroke(
+                        &line,
+                        Stroke::default()
+                            .with_color(if i == 5 {
+                                palette.secondary.strong.text
+                            } else {
+                                palette.secondary.base.color
+                            })
+                            .with_width(if i == 5 { 10.0 } else { 4.0 })
+                            .with_line_cap(LineCap::Round),
+                    );
+                }
+
+                //right side
+                for i in 1..10 {
+                    let point =
+                        Point::new(top_left.x + width, top_left.y + height * 0.1 * i as f32);
+
+                    let dx = center.x - point.x;
+                    let dy = center.y - point.y;
+
+                    let end_point = if i == 5 {
+                        Point::new(point.x - inner_padding_min, point.y)
+                    } else {
+                        Point::new(
+                            frame.width() - inner_padding_min,
+                            point.y + ((frame.width() - inner_padding_min) - point.x) * (dy / dx),
+                        )
+                    };
+
+                    let line = Path::line(point, end_point);
+
+                    frame.stroke(
+                        &line,
+                        Stroke::default()
+                            .with_color(if i == 5 {
+                                palette.secondary.strong.text
+                            } else {
+                                palette.secondary.base.color
+                            })
+                            .with_width(if i == 5 { 10.0 } else { 4.0 })
+                            .with_line_cap(LineCap::Round),
+                    );
+                }
+            })
         });
 
         vec![static_layer]
