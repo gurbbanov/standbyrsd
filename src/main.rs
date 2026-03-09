@@ -434,6 +434,13 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
     ) {
         let bounds = layout.bounds();
 
+        let expanded_viewport = Rectangle {
+            x: viewport.x - self.page_width,
+            y: viewport.y,
+            width: viewport.width + self.page_width * 2.0,
+            height: viewport.height,
+        };
+
         renderer.with_layer(bounds, |renderer: &mut Renderer| {
             renderer.with_translation(Vector::new(self.offset, 0.0), |renderer: &mut Renderer| {
                 for (i, (child, child_layout)) in
@@ -446,7 +453,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
                         style,
                         child_layout,
                         cursor,
-                        viewport,
+                        &expanded_viewport,
                     );
                 }
             });
