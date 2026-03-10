@@ -17,11 +17,21 @@ use iced::{
 };
 use std::time::{Duration, Instant};
 
+const SF_PRO_EXPANDED_BOLD: Font = Font {
+    family: iced::font::Family::Name("SF Pro"),
+    weight: iced::font::Weight::Bold,
+    stretch: iced::font::Stretch::Expanded,
+    style: iced::font::Style::Normal,
+};
+
 pub fn main() -> iced::Result {
     iced::daemon(Application::new, Application::update, Application::view)
         .subscription(Application::subscription)
         .settings(Settings {
-            fonts: vec![include_bytes!("../fonts/sfpro.ttf").into()],
+            fonts: vec![
+                include_bytes!("../fonts/SF-Pro-Rounded.ttf").into(),
+                include_bytes!("../fonts/SF-Pro-Expanded.ttf").into(),
+            ],
             default_font: Font {
                 family: Family::Name("SF Pro Rounded"),
                 weight: Weight::Black,
@@ -1131,7 +1141,8 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
             let scale = (frame.width() * frame.height()) / (1920.0 * 1080.0);
 
             let padding = scale * 70.0;
-            let inner_padding_hour = scale * 250.0;
+            let inner_padding_hourtb = scale * 250.0; //inner padding for hours located at top and bottom
+            let inner_padding_hourlr = scale * 130.0; //inner padding for hours located at left and right
             let inner_padding_min = scale * 120.0;
 
             let top_left = Point::new(padding, padding);
@@ -1185,8 +1196,8 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         Point::new(point.x, inner_padding_min)
                     } else {
                         Point::new(
-                            point.x + (inner_padding_hour - point.y) * (dx / dy),
-                            inner_padding_hour,
+                            point.x + (inner_padding_hourtb - point.y) * (dx / dy),
+                            inner_padding_hourtb,
                         )
                     };
 
@@ -1195,7 +1206,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                     frame.stroke(
                         &line,
                         Stroke::default()
-                            .with_color(palette.secondary.strong.text)
+                            .with_color(color!(169, 169, 169))
                             .with_width(10.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
@@ -1218,7 +1229,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                     frame.stroke(
                         &line,
                         Stroke::default()
-                            .with_color(palette.secondary.base.color)
+                            .with_color(color!(89, 89, 89))
                             .with_width(4.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
@@ -1234,8 +1245,9 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         Point::new(point.x, frame.height() - inner_padding_min)
                     } else {
                         Point::new(
-                            point.x + ((frame.height() - inner_padding_hour) - point.y) * (dx / dy),
-                            frame.height() - inner_padding_hour,
+                            point.x
+                                + ((frame.height() - inner_padding_hourtb) - point.y) * (dx / dy),
+                            frame.height() - inner_padding_hourtb,
                         )
                     };
 
@@ -1244,7 +1256,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                     frame.stroke(
                         &line,
                         Stroke::default()
-                            .with_color(palette.secondary.strong.text)
+                            .with_color(color!(169, 169, 169))
                             .with_width(10.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
@@ -1258,11 +1270,11 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                     let dy = center.y - point.y;
 
                     let end_point = if i == 5 {
-                        Point::new(point.x + inner_padding_min, point.y)
+                        Point::new(point.x + inner_padding_hourlr * 1.5, point.y)
                     } else {
                         Point::new(
-                            inner_padding_min,
-                            point.y + (inner_padding_min - point.x) * (dy / dx),
+                            inner_padding_hourlr,
+                            point.y + (inner_padding_hourlr - point.x) * (dy / dx),
                         )
                     };
 
@@ -1272,9 +1284,9 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         &line,
                         Stroke::default()
                             .with_color(if i == 5 {
-                                palette.secondary.strong.text
+                                color!(169, 169, 169)
                             } else {
-                                palette.secondary.base.color
+                                color!(89, 89, 89)
                             })
                             .with_width(if i == 5 { 10.0 * scale } else { 4.0 * scale })
                             .with_line_cap(LineCap::Round),
@@ -1290,11 +1302,12 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                     let dy = center.y - point.y;
 
                     let end_point = if i == 5 {
-                        Point::new(point.x - inner_padding_min, point.y)
+                        Point::new(point.x - inner_padding_hourlr * 1.5, point.y)
                     } else {
                         Point::new(
-                            frame.width() - inner_padding_min,
-                            point.y + ((frame.width() - inner_padding_min) - point.x) * (dy / dx),
+                            frame.width() - inner_padding_hourlr,
+                            point.y
+                                + ((frame.width() - inner_padding_hourlr) - point.x) * (dy / dx),
                         )
                     };
 
@@ -1304,13 +1317,39 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         &line,
                         Stroke::default()
                             .with_color(if i == 5 {
-                                palette.secondary.strong.text
+                                color!(169, 169, 169)
                             } else {
-                                palette.secondary.base.color
+                                color!(89, 89, 89)
                             })
                             .with_width(if i == 5 { 10.0 * scale } else { 4.0 * scale })
                             .with_line_cap(LineCap::Round),
                     );
+                }
+
+                let hours = vec![
+                    ("12", Point::new(frame.center().x, 210.0 * scale)),
+                    (
+                        "3",
+                        Point::new(frame.width() - 360.0 * scale, frame.center().y),
+                    ),
+                    (
+                        "6",
+                        Point::new(frame.center().x, frame.height() - 210.0 * scale),
+                    ),
+                    ("9", Point::new(360.0 * scale, frame.center().y)),
+                ];
+
+                for (hour, point) in hours {
+                    frame.fill_text(canvas::Text {
+                        content: format!("{hour}"),
+                        size: iced::Pixels(125.0 * scale),
+                        position: point,
+                        color: palette.secondary.strong.text,
+                        align_x: text::Alignment::Center,
+                        align_y: iced::alignment::Vertical::Center,
+                        font: SF_PRO_EXPANDED_BOLD,
+                        ..canvas::Text::default()
+                    });
                 }
             })
         });
