@@ -1160,7 +1160,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
             let doli_hours = vec![0.0907, 0.3611, 0.5, 0.6411, 0.9093];
 
             let width = frame.width() - padding * 2.0;
-            let height = frame.height() - padding * 2.0;
+            let height = frame.height();
 
             frame.with_save(|frame| {
                 //upper side
@@ -1264,7 +1264,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
 
                 //left side
                 for i in 1..10 {
-                    let point = Point::new(top_left.x, top_left.y + height * 0.1 * i as f32);
+                    let point = Point::new(top_left.x, height * 0.1 * i as f32);
 
                     let dx = center.x - point.x;
                     let dy = center.y - point.y;
@@ -1295,8 +1295,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
 
                 //right side
                 for i in 1..10 {
-                    let point =
-                        Point::new(top_left.x + width, top_left.y + height * 0.1 * i as f32);
+                    let point = Point::new(top_left.x + width, height * 0.1 * i as f32);
 
                     let dx = center.x - point.x;
                     let dy = center.y - point.y;
@@ -1325,6 +1324,33 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                             .with_line_cap(LineCap::Round),
                     );
                 }
+
+                let now = chrono::Local::now();
+
+                frame.fill_text(canvas::Text {
+                    content: now.weekday().to_string().to_uppercase(),
+                    size: iced::Pixels(50.0 * scale),
+                    position: Point::new(frame.width() * 2.0 / 3.0, frame.center().y),
+                    color: color!(255, 0, 0),
+                    align_x: text::Alignment::Center,
+                    align_y: iced::alignment::Vertical::Center,
+                    font: SF_PRO_EXPANDED_BOLD,
+                    ..canvas::Text::default()
+                });
+
+                frame.fill_text(canvas::Text {
+                    content: now.day().to_string(),
+                    size: iced::Pixels(50.0 * scale),
+                    position: Point::new(
+                        frame.width() * 2.0 / 3.0 + 110.0 * scale,
+                        frame.center().y,
+                    ),
+                    color: Color::WHITE,
+                    align_x: text::Alignment::Center,
+                    align_y: iced::alignment::Vertical::Center,
+                    font: SF_PRO_EXPANDED_BOLD,
+                    ..canvas::Text::default()
+                });
 
                 let hours = vec![
                     ("12", Point::new(frame.center().x, 210.0 * scale)),
