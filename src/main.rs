@@ -1128,9 +1128,11 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
         let palette = theme.extended_palette();
 
         let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
-            let padding = 70.0;
-            let inner_padding_hour = 250.0;
-            let inner_padding_min = 120.0;
+            let scale = (frame.width() * frame.height()) / (1920.0 * 1080.0);
+
+            let padding = scale * 70.0;
+            let inner_padding_hour = scale * 250.0;
+            let inner_padding_min = scale * 120.0;
 
             let top_left = Point::new(padding, padding);
             let top_right = Point::new(frame.width() - padding, padding);
@@ -1168,7 +1170,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         &line,
                         Stroke::default()
                             .with_color(palette.secondary.base.color)
-                            .with_width(4.0)
+                            .with_width(4.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -1194,7 +1196,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         &line,
                         Stroke::default()
                             .with_color(palette.secondary.strong.text)
-                            .with_width(10.0)
+                            .with_width(10.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -1217,7 +1219,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         &line,
                         Stroke::default()
                             .with_color(palette.secondary.base.color)
-                            .with_width(4.0)
+                            .with_width(4.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -1243,7 +1245,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                         &line,
                         Stroke::default()
                             .with_color(palette.secondary.strong.text)
-                            .with_width(10.0)
+                            .with_width(10.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -1274,7 +1276,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                             } else {
                                 palette.secondary.base.color
                             })
-                            .with_width(if i == 5 { 10.0 } else { 4.0 })
+                            .with_width(if i == 5 { 10.0 * scale } else { 4.0 * scale })
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -1306,7 +1308,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                             } else {
                                 palette.secondary.base.color
                             })
-                            .with_width(if i == 5 { 10.0 } else { 4.0 })
+                            .with_width(if i == 5 { 10.0 * scale } else { 4.0 * scale })
                             .with_line_cap(LineCap::Round),
                     );
                 }
