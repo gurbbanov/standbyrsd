@@ -6,15 +6,15 @@ use iced::advanced::widget::{self};
 use iced::advanced::{Clipboard, Shell};
 use iced::border::Radius;
 use iced::font::{Family, Weight};
-use iced::mouse;
 use iced::time::{self, milliseconds};
-use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
+use iced::widget::canvas::{Cache, Geometry, LineCap, Path, Stroke, stroke};
 use iced::widget::{button, canvas, center, column, container, responsive, row, stack, text};
 use iced::window::{self, Id};
 use iced::{
     Alignment, Color, Degrees, Element, Event, Font, Length, Point, Radians, Rectangle, Renderer,
     Settings, Size, Subscription, Task, Theme, Vector, color,
 };
+use iced::{Pixels, mouse};
 use std::time::{Duration, Instant};
 
 const SF_PRO_EXPANDED_BOLD: Font = Font {
@@ -394,6 +394,7 @@ impl Default for Application {
                 ))),
             ],
             page0_right: vec![
+                AppWidget::Forecast(ForecastWidget::default()),
                 AppWidget::Calendar(CalendarWidget::default()),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalHalf(
                     MinimalClockHalf::default(),
@@ -890,6 +891,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
 enum AppWidget {
     Calendar(CalendarWidget),
     Clock(ClockWidget),
+    Forecast(ForecastWidget),
 }
 
 impl AppWidget {
@@ -897,20 +899,14 @@ impl AppWidget {
         match self {
             AppWidget::Clock(w) => w.view(time, size),
             AppWidget::Calendar(w) => w.view(time, size),
+            AppWidget::Forecast(w) => w.view(),
         }
     }
 }
 
+#[derive(Default)]
 struct CalendarWidget {
     cache: Cache,
-}
-
-impl Default for CalendarWidget {
-    fn default() -> Self {
-        Self {
-            cache: Cache::default(),
-        }
-    }
 }
 
 impl CalendarWidget {
@@ -1025,7 +1021,7 @@ impl<Message> canvas::Program<Message> for CalendarWidget {
                 let is_weekend = col >= 5;
 
                 if is_today {
-                    let r = cell_w * 0.6;
+                    let r = cell_w * 0.5;
                     frame.fill(&Path::circle(Point::new(x, y), r), color!(255, 0, 0));
                 }
 
@@ -1776,6 +1772,77 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
             })
         });
 
+        vec![static_layer]
+    }
+}
+
+struct ForecastWidget {
+    style: ForecastStyle,
+}
+
+impl Default for ForecastWidget {
+    fn default() -> Self {
+        Self {
+            style: ForecastStyle::MinimalHalf(MinimalForecastHalf::default()),
+        }
+    }
+}
+
+impl ForecastWidget {
+    fn view(&self) -> Element<'_, Message> {
+        self.style.view()
+    }
+}
+
+enum ForecastStyle {
+    MinimalHalf(MinimalForecastHalf),
+}
+
+impl ForecastStyle {
+    fn view(&self) -> Element<'_, Message> {
+        match self {
+            Self::MinimalHalf(w) => w.view(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct MinimalForecastHalf {
+    cache: Cache,
+}
+
+impl MinimalForecastHalf {
+    fn view(&self) -> Element<'_, Message> {
+        canvas(self as &Self)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+}
+
+impl<Message> canvas::Program<Message> for MinimalForecastHalf {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
+            frame.fill_text(canvas::Text {
+                content: "there will be forecast".into(),
+                size: Pixels(50.0),
+                position: frame.center(),
+                color: color!(255, 0, 0),
+                align_x: text::Alignment::Center,
+                align_y: iced::alignment::Vertical::Center,
+                font: SF_PRO_EXPANDED_BOLD,
+                ..canvas::Text::default()
+            });
+        });
         vec![static_layer]
     }
 }
