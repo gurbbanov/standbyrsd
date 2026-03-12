@@ -9,7 +9,7 @@ use iced::font::{Family, Weight};
 use iced::mouse;
 use iced::time::{self, milliseconds};
 use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
-use iced::widget::{Grid, button, canvas, center, column, container, responsive, row, stack, text};
+use iced::widget::{button, canvas, center, column, container, responsive, row, stack, text};
 use iced::window::{self, Id};
 use iced::{
     Alignment, Color, Degrees, Element, Event, Font, Length, Point, Radians, Rectangle, Renderer,
@@ -85,8 +85,9 @@ fn ease_spring(t: f32, v0: f32) -> f32 {
 
 struct Application {
     time: chrono::DateTime<Local>,
-    widgets_1: Vec<AppWidget>,
-    widgets_2: Vec<AppWidget>,
+    page0_left: Vec<AppWidget>,
+    page0_right: Vec<AppWidget>,
+    page1_widgets: Vec<AppWidget>,
     fullscreen: bool,
     main_window: Option<window::Id>,
     current_page: usize,
@@ -304,44 +305,79 @@ impl Application {
     }
 
     fn page0(&self, size: Size) -> Element<'_, Message> {
-        container(responsive(move |size| {
-            container(row![
-                center(self.widgets_1[0].view(self.time, size))
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-                column![
-                    container(button("fullscreen").on_press(Message::ToggleFullscreen))
-                        .width(Length::Fill)
-                        .align_x(Alignment::End),
-                    center(self.widgets_1[1].view(self.time, size))
-                        .width(Length::Fill)
-                        .height(Length::Fill),
-                ]
-            ])
-            .style(|_| container::Style {
-                background: Some(Color::BLACK.into()),
-                ..Default::default()
-            })
-            .into()
-        }))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    }
+        let sh = size.height;
+        let sw = size.width / 2.0;
 
-    fn page1(&self, _size: Size) -> Element<'_, Message> {
-        container(responsive(move |size| {
-            self.widgets_2[0].view(self.time, size)
-        }))
+        let left_items: Vec<Element<'_, Message>> = self
+            .page0_left
+            .iter()
+            .map(|w| {
+                container(w.view(self.time, Size::new(sw, sh)))
+                    .width(Length::Fixed(sw))
+                    .height(Length::Fixed(sh))
+                    .style(|_| container::Style {
+                        background: Some(Color::BLACK.into()),
+                        ..Default::default()
+                    })
+                    .into()
+            })
+            .collect();
+
+        let right_items: Vec<Element<'_, Message>> = self
+            .page0_right
+            .iter()
+            .map(|w| {
+                container(w.view(self.time, Size::new(sw, sh)))
+                    .width(Length::Fixed(sw))
+                    .height(Length::Fixed(sh))
+                    .style(|_| container::Style {
+                        background: Some(Color::BLACK.into()),
+                        ..Default::default()
+                    })
+                    .into()
+            })
+            .collect();
+
+        let left = vertical_carousel(left_items, sw, sh);
+        let right = vertical_carousel(right_items, sw, sh);
+
+        container(row![
+            left,
+            column![
+                container(button("fullscreen").on_press(Message::ToggleFullscreen))
+                    .width(Length::Fill)
+                    .align_x(Alignment::End),
+                right,
+            ]
+            .width(Length::Fixed(sw))
+            .height(Length::Fixed(sh)),
+        ])
         .style(|_| container::Style {
             background: Some(Color::BLACK.into()),
             ..Default::default()
         })
-        .width(Length::Fill)
-        .height(Length::Fill)
+        .width(Length::Fixed(size.width))
+        .height(Length::Fixed(size.height))
         .into()
+    }
+
+    fn page1(&self, size: Size) -> Element<'_, Message> {
+        let items: Vec<Element<'_, Message>> = self
+            .page1_widgets
+            .iter()
+            .map(|w| {
+                container(w.view(self.time, Size::new(size.width, size.height)))
+                    .width(Length::Fixed(size.width))
+                    .height(Length::Fixed(size.height))
+                    .style(|_| container::Style {
+                        background: Some(Color::BLACK.into()),
+                        ..Default::default()
+                    })
+                    .into()
+            })
+            .collect();
+
+        vertical_carousel(items, size.width, size.height)
     }
 }
 
@@ -349,13 +385,28 @@ impl Default for Application {
     fn default() -> Self {
         Application {
             time: chrono::Local::now(),
-            widgets_1: vec![
-                AppWidget::Clock(ClockWidget::default()),
-                AppWidget::Calendar(CalendarWidget),
+            page0_left: vec![
+                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueHalf(
+                    AnalogueClockHalf::default(),
+                ))),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::DigitalHalf(
+                    DigitalClockHalf::default(),
+                ))),
             ],
-            widgets_2: vec![AppWidget::Clock(ClockWidget::new(
-                ClockStyle::AnalogueFull(AnalogueClockFull::default()),
-            ))],
+            page0_right: vec![
+                AppWidget::Calendar(CalendarWidget::default()),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalHalf(
+                    MinimalClockHalf::default(),
+                ))),
+            ],
+            page1_widgets: vec![
+                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueFull(
+                    AnalogueClockFull::default(),
+                ))),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueFull(
+                    AnalogueClockFull::default(),
+                ))),
+            ],
             fullscreen: false,
             main_window: None,
             current_page: 0,
@@ -554,6 +605,288 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct CarouselState {
+    current: usize,
+    offset_px: f32,
+    velocity: f32,
+    snap: Option<CarouselSnap>,
+    last_event: Option<Instant>,
+}
+
+#[derive(Debug, Clone)]
+struct CarouselSnap {
+    start: f32,
+    end: f32,
+    velocity: f32,
+    started_at: Instant,
+}
+
+impl CarouselState {
+    fn total_offset(&self, sh: f32) -> f32 {
+        if let Some(ref s) = self.snap {
+            let elapsed = s.started_at.elapsed().as_secs_f32();
+            let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
+            let dist = s.end - s.start;
+            let v0 = if dist.abs() > 0.001 {
+                s.velocity / dist
+            } else {
+                0.0
+            };
+            s.start + dist * ease_spring(t, v0)
+        } else {
+            -(self.current as f32) * sh + self.offset_px
+        }
+    }
+
+    fn is_snap_done(&self) -> bool {
+        self.snap.as_ref().map_or(false, |s| {
+            s.started_at.elapsed().as_millis() >= SNAP_DURATION_MS as u128
+        })
+    }
+
+    fn try_snap(&mut self, count: usize, sh: f32) {
+        let ratio = self.offset_px / sh;
+        let from = self.current;
+        let abs_now = -(from as f32) * sh + self.offset_px;
+
+        let (target, abs_end) = if ratio < -SNAP_THRESHOLD && from + 1 < count {
+            (from + 1, -((from + 1) as f32) * sh)
+        } else if ratio > SNAP_THRESHOLD && from > 0 {
+            (from - 1, -((from - 1) as f32) * sh)
+        } else {
+            (from, -(from as f32) * sh)
+        };
+
+        self.current = target;
+        self.snap = Some(CarouselSnap {
+            start: abs_now,
+            end: abs_end,
+            velocity: self.velocity,
+            started_at: Instant::now(),
+        });
+        self.offset_px = 0.0;
+        self.last_event = None;
+    }
+}
+
+struct VerticalCarousel<'a> {
+    items: Vec<Element<'a, Message>>,
+    slot_width: f32,
+    slot_height: f32,
+}
+
+fn vertical_carousel<'a>(
+    items: Vec<Element<'a, Message>>,
+    slot_width: f32,
+    slot_height: f32,
+) -> Element<'a, Message> {
+    VerticalCarousel {
+        items,
+        slot_width,
+        slot_height,
+    }
+    .into()
+}
+
+impl<'a> From<VerticalCarousel<'a>> for Element<'a, Message, Theme, Renderer> {
+    fn from(w: VerticalCarousel<'a>) -> Self {
+        Element::new(w)
+    }
+}
+
+impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'a> {
+    fn size(&self) -> Size<Length> {
+        Size::new(
+            Length::Fixed(self.slot_width),
+            Length::Fixed(self.slot_height),
+        )
+    }
+
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::of::<CarouselState>()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        widget::tree::State::new(CarouselState::default())
+    }
+
+    fn children(&self) -> Vec<widget::Tree> {
+        self.items.iter().map(|c| widget::Tree::new(c)).collect()
+    }
+
+    fn diff(&self, tree: &mut widget::Tree) {
+        tree.diff_children(&self.items);
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let sw = self.slot_width;
+        let sh = self.slot_height;
+        let child_limits = layout::Limits::new(Size::ZERO, Size::new(sw, sh));
+
+        let children: Vec<layout::Node> = self
+            .items
+            .iter_mut()
+            .enumerate()
+            .map(|(i, child)| {
+                let mut node =
+                    child
+                        .as_widget_mut()
+                        .layout(&mut tree.children[i], renderer, &child_limits);
+                node = node.translate(Vector::new(0.0, i as f32 * sh));
+                node
+            })
+            .collect();
+
+        layout::Node::with_children(
+            limits.resolve(Length::Fixed(sw), Length::Fixed(sh), Size::new(sw, sh)),
+            children,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<CarouselState>();
+        let bounds = layout.bounds();
+        let sh = self.slot_height;
+
+        let total_offset_y = state.total_offset(sh);
+
+        let expanded_viewport = Rectangle {
+            x: viewport.x,
+            y: viewport.y - sh,
+            width: viewport.width,
+            height: viewport.height + sh * 2.0,
+        };
+
+        renderer.with_layer(bounds, |renderer: &mut Renderer| {
+            renderer.with_translation(
+                Vector::new(0.0, total_offset_y),
+                |renderer: &mut Renderer| {
+                    for (i, (child, child_layout)) in
+                        self.items.iter().zip(layout.children()).enumerate()
+                    {
+                        child.as_widget().draw(
+                            &tree.children[i],
+                            renderer,
+                            theme,
+                            style,
+                            child_layout,
+                            cursor,
+                            &expanded_viewport,
+                        );
+                    }
+                },
+            );
+        });
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
+        let sh = self.slot_height;
+        let count = self.items.len();
+
+        {
+            let state = tree.state.downcast_mut::<CarouselState>();
+
+            if state.is_snap_done() {
+                state.snap = None;
+            }
+
+            if state.snap.is_none() {
+                if let Some(last) = state.last_event {
+                    if last.elapsed().as_millis() >= IDLE_MS as u128 {
+                        state.try_snap(count, sh);
+                    }
+                }
+            }
+
+            if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
+                if cursor.is_over(bounds) && state.snap.is_none() {
+                    let dy = match delta {
+                        mouse::ScrollDelta::Pixels { y, .. } => *y * 2.0,
+                        mouse::ScrollDelta::Lines { y, .. } => *y * 80.0,
+                    };
+                    if dy.abs() > 0.3 {
+                        let max_drag = if state.current > 0 { sh } else { 0.0 };
+                        let min_drag = if state.current + 1 < count { -sh } else { 0.0 };
+                        state.offset_px = (state.offset_px + dy).clamp(min_drag, max_drag);
+                        state.velocity = dy;
+                        state.last_event = Some(Instant::now());
+
+                        if dy.abs() < 1.5 {
+                            state.try_snap(count, sh);
+                        }
+
+                        return;
+                    }
+                }
+            }
+        }
+
+        for (i, (child, child_layout)) in self.items.iter_mut().zip(layout.children()).enumerate() {
+            child.as_widget_mut().update(
+                &mut tree.children[i],
+                event,
+                child_layout,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &widget::Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.items
+            .iter()
+            .zip(layout.children())
+            .enumerate()
+            .map(|(i, (child, child_layout))| {
+                child.as_widget().mouse_interaction(
+                    &tree.children[i],
+                    child_layout,
+                    cursor,
+                    viewport,
+                    renderer,
+                )
+            })
+            .max()
+            .unwrap_or_default()
+    }
+}
+
 enum AppWidget {
     Calendar(CalendarWidget),
     Clock(ClockWidget),
@@ -568,97 +901,160 @@ impl AppWidget {
     }
 }
 
-struct CalendarWidget;
+struct CalendarWidget {
+    cache: Cache,
+}
+
+impl Default for CalendarWidget {
+    fn default() -> Self {
+        Self {
+            cache: Cache::default(),
+        }
+    }
+}
 
 impl CalendarWidget {
-    fn view(&self, time: chrono::DateTime<Local>, size: Size) -> Element<'_, Message> {
-        let columns = 7;
-        let spacing = 1.0;
-        let cell_width = (size.width - (columns as f32 - 1.0) * spacing) / columns as f32;
-        let cell_height = cell_width * 0.6;
-        let font_size = (size.width / 2.0).min(size.height) / 20.0;
+    fn view(&self, _time: chrono::DateTime<Local>, _size: Size) -> Element<'_, Message> {
+        self.cache.clear();
+        canvas(self as &Self)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+}
 
-        let mut grid: Grid<'_, Message, Theme, Renderer> =
-            Grid::new().columns(columns).spacing(spacing);
+impl<Message> canvas::Program<Message> for CalendarWidget {
+    type State = ();
 
-        let weekdays = ["mo", "tu", "we", "th", "fr", "sa", "su"];
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let layer = self.cache.draw(renderer, bounds.size(), |frame| {
+            let now = chrono::Local::now();
 
-        let first_day_of_month = weekday_to_number(
-            &NaiveDate::from_ymd_opt(time.year(), time.month(), 1)
+            let w = frame.width();
+            let h = frame.height() * 0.9;
+
+            let first_day_of_month = weekday_to_number(
+                &NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+                    .unwrap()
+                    .weekday(),
+            );
+
+            let last_day_of_month = NaiveDate::from_ymd_opt(now.year(), now.month() + 1, 1)
+                .unwrap_or_else(|| NaiveDate::from_ymd_opt(now.year() + 1, 1, 1).unwrap())
+                .pred_opt()
                 .unwrap()
-                .weekday(),
-        );
+                .day() as usize;
 
-        let last_day_of_month = NaiveDate::from_ymd_opt(time.year(), time.month() + 1, 1)
-            .unwrap_or_else(|| NaiveDate::from_ymd_opt(time.year() + 1, 1, 1).unwrap())
-            .pred_opt()
-            .unwrap()
-            .day() as usize;
+            let num_rows =
+                ((first_day_of_month - 1 + last_day_of_month) as f32 / 7.0).ceil() as usize;
 
-        for (ind, i) in weekdays.iter().enumerate() {
-            grid = grid.push(
-                container(text(*i).size(font_size).color(if ind == 5 || ind == 6 {
-                    color!(87, 87, 87)
-                } else {
-                    Color::WHITE
-                }))
-                .width(cell_width)
-                .height(cell_height)
-                .center_x(cell_width)
-                .center_y(cell_height),
-            )
-        }
+            let columns = 7usize;
 
-        for _ in 0..first_day_of_month - 1 {
-            grid = grid.push(container(""));
-        }
+            let cell_w_by_width = w / columns as f32;
+            let total_rows = (num_rows + 2) as f32;
+            let cell_w_by_height = h / total_rows;
+            let cell_w = cell_w_by_width.min(cell_w_by_height);
 
-        for i in 1..=last_day_of_month {
-            if i == time.day() as usize {
-                grid = grid.push(
-                    container(text(i.to_string()).size(font_size).color(Color::WHITE))
-                        .width(cell_width)
-                        .height(cell_height)
-                        .center_x(cell_width)
-                        .center_y(cell_height)
-                        .style(move |_| container::Style {
-                            background: Some(color!(255, 0, 0).into()),
-                            border: iced::Border {
-                                radius: (cell_height * 0.9).into(),
-                                width: 0.0,
-                                color: iced::Color::TRANSPARENT,
-                            },
-                            ..Default::default()
-                        }),
-                );
-            } else if (i + first_day_of_month - 1 - (i + first_day_of_month - 1) / 7) % 6 == 0 {
-                grid = grid.push(
-                    container(
-                        text(i.to_string())
-                            .size(font_size)
-                            .color(color!(87, 87, 87)),
-                    )
-                    .height(cell_height)
-                    .center_x(cell_width)
-                    .center_y(cell_height),
-                );
-            } else {
-                grid = grid.push(
-                    container(text(i.to_string()).size(font_size).color(Color::WHITE))
-                        .height(cell_height)
-                        .center_x(cell_width)
-                        .center_y(cell_height),
-                );
+            let cell_h = cell_w;
+            let font_size = cell_w * 0.38;
+            let month_font_size = cell_w * 0.7;
+
+            let grid_w = cell_w * columns as f32;
+            let total_h = month_font_size + cell_h * (1.0 + num_rows as f32);
+            let offset_x = (w - grid_w) * 0.5;
+            let offset_y = (h - total_h) * 0.5;
+
+            frame.fill_text(canvas::Text {
+                content: format!("{}", now.format("%B")),
+                position: Point::new(offset_x * 1.3, offset_y + month_font_size * 0.5),
+                size: month_font_size.into(),
+                color: color!(255, 0, 0),
+                font: Font {
+                    family: Family::Name("SF Pro Rounded"),
+                    weight: Weight::Black,
+                    ..Font::DEFAULT
+                },
+                align_x: text::Alignment::Left,
+                align_y: iced::alignment::Vertical::Center,
+                ..canvas::Text::default()
+            });
+
+            let weekdays = ["mo", "tu", "we", "th", "fr", "sa", "su"];
+
+            for (col, label) in weekdays.iter().enumerate() {
+                let x = offset_x + col as f32 * cell_w + cell_w * 0.5;
+                let y = offset_y + month_font_size + cell_h * 0.5;
+                let is_weekend = col >= 5;
+                frame.fill_text(canvas::Text {
+                    content: label.to_string(),
+                    position: Point::new(x, y),
+                    size: font_size.into(),
+                    color: if is_weekend {
+                        color!(87, 87, 87)
+                    } else {
+                        Color::WHITE
+                    },
+                    font: Font {
+                        family: Family::Name("SF Pro Rounded"),
+                        weight: Weight::Black,
+                        ..Font::DEFAULT
+                    },
+                    align_x: text::Alignment::Center,
+                    align_y: iced::alignment::Vertical::Center,
+                    ..canvas::Text::default()
+                });
             }
-        }
 
-        column![
-            text(format!(" {}", time.format("%B")))
-                .size(font_size * 2.0)
-                .color(color!(255, 0, 0)),
-            container(grid).width(size.width / 2.2)
-        ]
-        .into()
+            let mut slot = first_day_of_month - 1;
+
+            for day in 1..=last_day_of_month {
+                let col = slot % 7;
+                let row = slot / 7;
+
+                let x = offset_x + col as f32 * cell_w + cell_w * 0.5;
+                let y = offset_y + month_font_size + cell_h + row as f32 * cell_h + cell_h * 0.5;
+
+                let is_today = day == now.day() as usize;
+                let is_weekend = col >= 5;
+
+                if is_today {
+                    let r = cell_w * 0.6;
+                    frame.fill(&Path::circle(Point::new(x, y), r), color!(255, 0, 0));
+                }
+
+                frame.fill_text(canvas::Text {
+                    content: day.to_string(),
+                    position: Point::new(x, y),
+                    size: font_size.into(),
+                    color: if is_today {
+                        Color::WHITE
+                    } else if is_weekend {
+                        color!(87, 87, 87)
+                    } else {
+                        Color::WHITE
+                    },
+                    font: Font {
+                        family: Family::Name("SF Pro Rounded"),
+                        weight: Weight::Black,
+                        ..Font::DEFAULT
+                    },
+                    align_x: text::Alignment::Center,
+                    align_y: iced::alignment::Vertical::Center,
+                    ..canvas::Text::default()
+                });
+
+                slot += 1;
+            }
+        });
+
+        vec![layer]
     }
 }
 
