@@ -6,8 +6,8 @@ use iced::advanced::widget::{self};
 use iced::advanced::{Clipboard, Shell};
 use iced::border::Radius;
 use iced::font::{Family, Weight};
-use iced::time::{self, milliseconds};
-use iced::widget::canvas::{Cache, Geometry, LineCap, Path, Stroke, stroke};
+use iced::time::{self, milliseconds, seconds};
+use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
 use iced::widget::{button, canvas, center, column, container, responsive, row, stack, text};
 use iced::window::{self, Id};
 use iced::{
@@ -15,6 +15,8 @@ use iced::{
     Settings, Size, Subscription, Task, Theme, Vector, color,
 };
 use iced::{Pixels, mouse};
+use reqwest;
+use serde::Deserialize;
 use std::time::{Duration, Instant};
 
 const SF_PRO_EXPANDED_BOLD: Font = Font {
@@ -24,6 +26,18 @@ const SF_PRO_EXPANDED_BOLD: Font = Font {
     style: iced::font::Style::Normal,
 };
 
+const SF_PRO_ROUNDED_BLACK: Font = Font {
+    family: Family::Name("SF Pro Rounded"),
+    weight: Weight::Black,
+    ..Font::DEFAULT
+};
+
+const SF_PRO_DISPLAY_BLACK: Font = Font {
+    family: Family::Name("SF Pro Display"),
+    weight: Weight::Black,
+    ..Font::DEFAULT
+};
+
 pub fn main() -> iced::Result {
     iced::daemon(Application::new, Application::update, Application::view)
         .subscription(Application::subscription)
@@ -31,6 +45,7 @@ pub fn main() -> iced::Result {
             fonts: vec![
                 include_bytes!("../fonts/SF-Pro-Rounded.ttf").into(),
                 include_bytes!("../fonts/SF-Pro-Expanded.ttf").into(),
+                include_bytes!("../fonts/SF-Pro-Display-Black.otf").into(),
             ],
             default_font: Font {
                 family: Family::Name("SF Pro Rounded"),
@@ -85,6 +100,7 @@ fn ease_spring(t: f32, v0: f32) -> f32 {
 
 struct Application {
     time: chrono::DateTime<Local>,
+    weather: WeatherStatus,
     page0_left: Vec<AppWidget>,
     page0_right: Vec<AppWidget>,
     page1_widgets: Vec<AppWidget>,
@@ -98,6 +114,8 @@ struct Application {
 #[derive(Debug, Clone)]
 enum Message {
     Tick(chrono::DateTime<Local>),
+    FetchWeather,
+    WeatherFetched(WeatherStatus),
     OpenMainWindow,
     WindowOpened(Id),
     ToggleFullscreen,
@@ -109,7 +127,13 @@ enum Message {
 
 impl Application {
     fn new() -> (Self, Task<Message>) {
-        (Self::default(), Task::done(Message::OpenMainWindow))
+        (
+            Self::default(),
+            Task::batch([
+                Task::done(Message::OpenMainWindow),
+                Task::done(Message::FetchWeather),
+            ]),
+        )
     }
 
     fn try_snap(&mut self) {
@@ -148,6 +172,21 @@ impl Application {
                 if local_time != self.time {
                     self.time = local_time;
                 }
+                Task::none()
+            }
+            Message::FetchWeather => Task::perform(
+                async {
+                    let mut w = Weather::default();
+                    match w.fetch().await {
+                        Ok(()) => WeatherStatus::Ok(w),
+                        Err(e) => WeatherStatus::Error(e.to_string()),
+                    }
+                },
+                Message::WeatherFetched,
+            ),
+            Message::WeatherFetched(status) => {
+                self.weather = status;
+
                 Task::none()
             }
             Message::OpenMainWindow => {
@@ -252,6 +291,7 @@ impl Application {
 
     fn subscription(&self) -> Subscription<Message> {
         let clock = time::every(milliseconds(16)).map(|_| Message::Tick(chrono::Local::now()));
+        let weather = time::every(seconds(600)).map(|_| Message::FetchWeather);
         let snap_idle = if matches!(self.drag, DragState::Active { .. }) {
             time::every(Duration::from_millis(16)).map(Message::SnapTick)
         } else {
@@ -262,7 +302,7 @@ impl Application {
         } else {
             Subscription::none()
         };
-        Subscription::batch([clock, snap_idle, anim])
+        Subscription::batch([clock, weather, snap_idle, anim])
     }
 
     fn view(&self, _id: Id) -> Element<'_, Message> {
@@ -312,7 +352,7 @@ impl Application {
             .page0_left
             .iter()
             .map(|w| {
-                container(w.view(self.time, Size::new(sw, sh)))
+                container(w.view(&self.weather))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .style(|_| container::Style {
@@ -327,7 +367,7 @@ impl Application {
             .page0_right
             .iter()
             .map(|w| {
-                container(w.view(self.time, Size::new(sw, sh)))
+                container(w.view(&self.weather))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .style(|_| container::Style {
@@ -366,7 +406,7 @@ impl Application {
             .page1_widgets
             .iter()
             .map(|w| {
-                container(w.view(self.time, Size::new(size.width, size.height)))
+                container(w.view(&self.weather))
                     .width(Length::Fixed(size.width))
                     .height(Length::Fixed(size.height))
                     .style(|_| container::Style {
@@ -385,20 +425,21 @@ impl Default for Application {
     fn default() -> Self {
         Application {
             time: chrono::Local::now(),
+            weather: WeatherStatus::Loading,
             page0_left: vec![
                 AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueHalf(
                     AnalogueClockHalf::default(),
+                ))),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalHalf(
+                    MinimalClockHalf::default(),
                 ))),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::DigitalHalf(
                     DigitalClockHalf::default(),
                 ))),
             ],
             page0_right: vec![
-                AppWidget::Forecast(ForecastWidget::default()),
                 AppWidget::Calendar(CalendarWidget::default()),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalHalf(
-                    MinimalClockHalf::default(),
-                ))),
+                AppWidget::Forecast(WeatherWidget::default()),
             ],
             page1_widgets: vec![
                 AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueFull(
@@ -765,13 +806,21 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
         let sh = self.slot_height;
 
         let total_offset_y = state.total_offset(sh);
+        let total_height = sh * self.items.len() as f32;
 
         let expanded_viewport = Rectangle {
             x: viewport.x,
-            y: viewport.y - sh,
+            y: viewport.y - total_height,
             width: viewport.width,
-            height: viewport.height + sh * 2.0,
+            height: viewport.height + total_height * 2.0,
         };
+
+        // let expanded_viewport = Rectangle {
+        //     x: viewport.x,
+        //     y: viewport.y - sh,
+        //     width: viewport.width,
+        //     height: viewport.height + sh * 2.0,
+        // };
 
         renderer.with_layer(bounds, |renderer: &mut Renderer| {
             renderer.with_translation(
@@ -891,15 +940,15 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
 enum AppWidget {
     Calendar(CalendarWidget),
     Clock(ClockWidget),
-    Forecast(ForecastWidget),
+    Forecast(WeatherWidget),
 }
 
 impl AppWidget {
-    pub fn view(&self, time: chrono::DateTime<Local>, size: Size) -> Element<'_, Message> {
+    pub fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
         match self {
-            AppWidget::Clock(w) => w.view(time, size),
-            AppWidget::Calendar(w) => w.view(time, size),
-            AppWidget::Forecast(w) => w.view(),
+            AppWidget::Clock(w) => w.view(),
+            AppWidget::Calendar(w) => w.view(),
+            AppWidget::Forecast(w) => w.view(weather),
         }
     }
 }
@@ -910,7 +959,7 @@ struct CalendarWidget {
 }
 
 impl CalendarWidget {
-    fn view(&self, _time: chrono::DateTime<Local>, _size: Size) -> Element<'_, Message> {
+    fn view(&self) -> Element<'_, Message> {
         self.cache.clear();
         canvas(self as &Self)
             .width(Length::Fill)
@@ -972,11 +1021,7 @@ impl<Message> canvas::Program<Message> for CalendarWidget {
                 position: Point::new(offset_x * 1.3, offset_y + month_font_size * 0.5),
                 size: month_font_size.into(),
                 color: color!(255, 0, 0),
-                font: Font {
-                    family: Family::Name("SF Pro Rounded"),
-                    weight: Weight::Black,
-                    ..Font::DEFAULT
-                },
+                font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Left,
                 align_y: iced::alignment::Vertical::Center,
                 ..canvas::Text::default()
@@ -997,11 +1042,7 @@ impl<Message> canvas::Program<Message> for CalendarWidget {
                     } else {
                         Color::WHITE
                     },
-                    font: Font {
-                        family: Family::Name("SF Pro Rounded"),
-                        weight: Weight::Black,
-                        ..Font::DEFAULT
-                    },
+                    font: SF_PRO_ROUNDED_BLACK,
                     align_x: text::Alignment::Center,
                     align_y: iced::alignment::Vertical::Center,
                     ..canvas::Text::default()
@@ -1036,11 +1077,7 @@ impl<Message> canvas::Program<Message> for CalendarWidget {
                     } else {
                         Color::WHITE
                     },
-                    font: Font {
-                        family: Family::Name("SF Pro Rounded"),
-                        weight: Weight::Black,
-                        ..Font::DEFAULT
-                    },
+                    font: SF_PRO_ROUNDED_BLACK,
                     align_x: text::Alignment::Center,
                     align_y: iced::alignment::Vertical::Center,
                     ..canvas::Text::default()
@@ -1071,7 +1108,7 @@ impl ClockWidget {
         Self { style }
     }
 
-    fn view(&self, _time: chrono::DateTime<Local>, _size: Size) -> Element<'_, Message> {
+    fn view(&self) -> Element<'_, Message> {
         self.style.view()
     }
 }
@@ -1138,11 +1175,7 @@ impl<Message> canvas::Program<Message> for DigitalClockHalf {
                 },
                 size: font_size.into(),
                 color: palette.secondary.base.text,
-                font: Font {
-                    family: Family::Name("SF Pro Rounded"),
-                    weight: Weight::Black,
-                    ..Font::DEFAULT
-                },
+                font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Center,
                 align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
@@ -1155,11 +1188,7 @@ impl<Message> canvas::Program<Message> for DigitalClockHalf {
                 position: center,
                 size: font_size.into(),
                 color: color!(255, 0, 0),
-                font: Font {
-                    family: Family::Name("SF Pro Rounded"),
-                    weight: Weight::Black,
-                    ..Font::DEFAULT
-                },
+                font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Center,
                 align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
@@ -1174,11 +1203,7 @@ impl<Message> canvas::Program<Message> for DigitalClockHalf {
                 },
                 size: font_size.into(),
                 color: palette.secondary.base.text,
-                font: Font {
-                    family: Family::Name("SF Pro Rounded"),
-                    weight: Weight::Black,
-                    ..Font::DEFAULT
-                },
+                font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Center,
                 align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
@@ -1382,11 +1407,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
                     color: palette.secondary.strong.text,
                     align_x: text::Alignment::Center,
                     align_y: iced::alignment::Vertical::Center,
-                    font: Font {
-                        family: Family::Name("SF Pro Rounded"),
-                        weight: Weight::Black,
-                        ..Font::DEFAULT
-                    },
+                    font: SF_PRO_ROUNDED_BLACK,
                     ..canvas::Text::default()
                 });
             }
@@ -1530,7 +1551,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
         let palette = theme.extended_palette();
 
         let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
-            let scale = (frame.width() * frame.height()) / (1920.0 * 1080.0);
+            let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
 
             let padding = scale * 70.0;
             let inner_padding_hourtb = scale * 250.0; //inner padding for hours located at top and bottom
@@ -1776,32 +1797,74 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
     }
 }
 
-struct ForecastWidget {
-    style: ForecastStyle,
+#[derive(Clone, Debug, Deserialize, Default)]
+struct Weather {
+    current: Option<CurrentForecast>,
+    daily: Option<DailyForecast>,
 }
 
-impl Default for ForecastWidget {
+impl Weather {
+    async fn fetch(&mut self) -> Result<(), reqwest::Error> {
+        let response: Weather = reqwest::get(
+            "https://api.open-meteo.com/v1/forecast?latitude=55.799&longitude=37.9373707&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min&current=temperature_2m,is_day,wind_speed_10m,precipitation",
+        ).await?.json::<Self>().await?;
+
+        *self = response;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CurrentForecast {
+    interval: i32,
+    is_day: u8,
+    precipitation: f32,
+    temperature_2m: f32,
+    wind_speed_10m: f32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct DailyForecast {
+    apparent_temperature_max: Vec<f32>,
+    apparent_temperature_min: Vec<f32>,
+    precipitation_probability_max: Vec<f32>,
+}
+
+struct WeatherWidget {
+    style: WeatherStyle,
+}
+
+impl Default for WeatherWidget {
     fn default() -> Self {
         Self {
-            style: ForecastStyle::MinimalHalf(MinimalForecastHalf::default()),
+            style: WeatherStyle::MinimalHalf(MinimalForecastHalf::default()),
         }
     }
 }
 
-impl ForecastWidget {
-    fn view(&self) -> Element<'_, Message> {
-        self.style.view()
+impl WeatherWidget {
+    fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
+        self.style.view(weather)
     }
 }
 
-enum ForecastStyle {
+#[derive(Clone, Debug, Default)]
+enum WeatherStatus {
+    #[default]
+    Loading,
+    Ok(Weather),
+    Error(String),
+}
+
+enum WeatherStyle {
     MinimalHalf(MinimalForecastHalf),
 }
 
-impl ForecastStyle {
-    fn view(&self) -> Element<'_, Message> {
+impl WeatherStyle {
+    fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
         match self {
-            Self::MinimalHalf(w) => w.view(),
+            Self::MinimalHalf(w) => w.view(weather),
         }
     }
 }
@@ -1812,15 +1875,14 @@ struct MinimalForecastHalf {
 }
 
 impl MinimalForecastHalf {
-    fn view(&self) -> Element<'_, Message> {
-        canvas(self as &Self)
+    fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
+        canvas((self as &Self, weather))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
-
-impl<Message> canvas::Program<Message> for MinimalForecastHalf {
+impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatus) {
     type State = ();
 
     fn draw(
@@ -1828,21 +1890,58 @@ impl<Message> canvas::Program<Message> for MinimalForecastHalf {
         _state: &Self::State,
         renderer: &Renderer,
         theme: &Theme,
-        bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
-            frame.fill_text(canvas::Text {
-                content: "there will be forecast".into(),
-                size: Pixels(50.0),
-                position: frame.center(),
-                color: color!(255, 0, 0),
-                align_x: text::Alignment::Center,
-                align_y: iced::alignment::Vertical::Center,
-                font: SF_PRO_EXPANDED_BOLD,
-                ..canvas::Text::default()
-            });
-        });
+        let (widget, weather) = self;
+        let static_layer = match weather {
+            WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.with_save(|frame| {
+                    let current = w.current.as_ref().unwrap();
+                    let daily = w.daily.as_ref().unwrap();
+
+                    let w = frame.width();
+                    let h = frame.height();
+
+                    let scale = (w + h) / (960.0 + 1080.0);
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("Moscow"),
+                        size: Pixels(w * 0.1),
+                        position: Point::new(w * 0.05, frame.center().y - 380.0 * scale),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}°", current.temperature_2m),
+                        size: Pixels(w * 0.33),
+                        position: Point::new(w * 0.05, frame.center().y),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!(
+                            "H:{}° L:{}°",
+                            daily.apparent_temperature_max[0], daily.apparent_temperature_min[0]
+                        ),
+                        size: Pixels(w * 0.08),
+                        position: Point::new(w * 0.05, frame.center().y + 380.0 * scale),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+                })
+            }),
+            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+        };
         vec![static_layer]
     }
 }

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { version = "0.14.0", features = ["canvas", "smol", "advanced"] }
+iced = { version = "0.14.0", features = ["canvas", "smol", "advanced", "tokio"] }
 iced_anim = "*"
 chrono = "*"
+serde = {version = "*", features = ["derive"]}
+reqwest = {version = "*", features = ["json"]}
+tokio = { version = "1", features = ["rt-multi-thread"] }
