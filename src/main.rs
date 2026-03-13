@@ -815,13 +815,6 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
             height: viewport.height + total_height * 2.0,
         };
 
-        // let expanded_viewport = Rectangle {
-        //     x: viewport.x,
-        //     y: viewport.y - sh,
-        //     width: viewport.width,
-        //     height: viewport.height + sh * 2.0,
-        // };
-
         renderer.with_layer(bounds, |renderer: &mut Renderer| {
             renderer.with_translation(
                 Vector::new(0.0, total_offset_y),
@@ -1806,7 +1799,8 @@ struct Weather {
 impl Weather {
     async fn fetch(&mut self) -> Result<(), reqwest::Error> {
         let response: Weather = reqwest::get(
-            "https://api.open-meteo.com/v1/forecast?latitude=55.799&longitude=37.9373707&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min&current=temperature_2m,is_day,wind_speed_10m,precipitation",
+            // "https://api.open-meteo.com/v1/forecast?latitude=55.799&longitude=37.9373707&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min&current=temperature_2m,is_day,wind_speed_10m,precipitation",
+            "https://api.open-meteo.com/v1/forecast?latitude=55.7569&longitude=37.6151&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code",
         ).await?.json::<Self>().await?;
 
         *self = response;
@@ -1822,6 +1816,7 @@ struct CurrentForecast {
     precipitation: f32,
     temperature_2m: f32,
     wind_speed_10m: f32,
+    weather_code: u8,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1829,6 +1824,8 @@ struct DailyForecast {
     apparent_temperature_max: Vec<f32>,
     apparent_temperature_min: Vec<f32>,
     precipitation_probability_max: Vec<f32>,
+    weather_code: Vec<i32>,
+    uv_index_max: Vec<f32>,
 }
 
 struct WeatherWidget {
@@ -1903,12 +1900,15 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     let w = frame.width();
                     let h = frame.height();
 
-                    let scale = (w + h) / (960.0 + 1080.0);
+                    let scale = w / 960.0;
 
                     frame.fill_text(canvas::Text {
                         content: format!("Moscow"),
-                        size: Pixels(w * 0.1),
-                        position: Point::new(w * 0.05, frame.center().y - 380.0 * scale),
+                        size: Pixels(w.min(h) * 0.1),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y - 380.0 * scale.min(h / 1080.0),
+                        ),
                         color: Color::WHITE,
                         align_y: iced::alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BLACK,
@@ -1917,8 +1917,21 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
 
                     frame.fill_text(canvas::Text {
                         content: format!("{}°", current.temperature_2m),
-                        size: Pixels(w * 0.33),
+                        size: Pixels(w.min(h) * 0.33),
                         position: Point::new(w * 0.05, frame.center().y),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}", wmo_code_description(current.weather_code)),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y + 300.0 * scale.min(h / 1080.0),
+                        ),
                         color: Color::WHITE,
                         align_y: iced::alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BLACK,
@@ -1930,8 +1943,11 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                             "H:{}° L:{}°",
                             daily.apparent_temperature_max[0], daily.apparent_temperature_min[0]
                         ),
-                        size: Pixels(w * 0.08),
-                        position: Point::new(w * 0.05, frame.center().y + 380.0 * scale),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y + 390.0 * scale.min(h / 1080.0),
+                        ),
                         color: Color::WHITE,
                         align_y: iced::alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BLACK,
@@ -1966,4 +1982,25 @@ fn hand_rotation(n: u32, total: u32) -> Degrees {
 
 fn hand_rotation_sec(value: f32, max: f32) -> iced::Radians {
     iced::Radians(value / max * std::f32::consts::TAU)
+}
+
+fn wmo_code_description(code: u8) -> &'static str {
+    match code {
+        0 => "Clear",
+        1 => "Mostly clear",
+        2 => "Partly cloudy",
+        3 => "Cloudy",
+        45..=48 => "Fog",
+        51..=55 => "Drizzle",
+        56..=57 => "Freezing drizzle",
+        61..=63 => "Rain",
+        65 => "Heavy rain",
+        66..=67 => "Freezing rain",
+        71..=73 => "Snow",
+        75 => "Heavy snow",
+        77 => "Blizzard",
+        80..=86 => "Wintry mix",
+        95..=99 => "Thunderstorm",
+        _ => "n/a",
+    }
 }
