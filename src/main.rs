@@ -446,7 +446,10 @@ impl Default for Application {
             ],
             page0_right: vec![
                 AppWidget::Calendar(CalendarWidget::default()),
-                AppWidget::Forecast(WeatherWidget::default()),
+                AppWidget::Weather(WeatherWidget::default()),
+                AppWidget::Weather(WeatherWidget::new(WeatherStyle::DetailedHalf(
+                    DetailedForecastHalf::default(),
+                ))),
             ],
             page1_widgets: vec![
                 AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueFull(
@@ -940,7 +943,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
 enum AppWidget {
     Calendar(CalendarWidget),
     Clock(ClockWidget),
-    Forecast(WeatherWidget),
+    Weather(WeatherWidget),
 }
 
 impl AppWidget {
@@ -948,7 +951,7 @@ impl AppWidget {
         match self {
             AppWidget::Clock(w) => w.view(),
             AppWidget::Calendar(w) => w.view(),
-            AppWidget::Forecast(w) => w.view(weather, size),
+            AppWidget::Weather(w) => w.view(weather, size),
         }
     }
 }
@@ -1806,8 +1809,7 @@ struct Weather {
 impl Weather {
     async fn fetch(&mut self) -> Result<(), reqwest::Error> {
         let response: Weather = reqwest::get(
-            // "https://api.open-meteo.com/v1/forecast?latitude=55.799&longitude=37.9373707&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min&current=temperature_2m,is_day,wind_speed_10m,precipitation",
-            "https://api.open-meteo.com/v1/forecast?latitude=55.7569&longitude=37.6151&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code",
+            "https://api.open-meteo.com/v1/forecast?latitude=55.7569&longitude=37.6151&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature",
         ).await?.json::<Self>().await?;
 
         *self = response;
@@ -1824,6 +1826,7 @@ struct CurrentForecast {
     temperature_2m: f32,
     wind_speed_10m: f32,
     weather_code: u8,
+    apparent_temperature: f32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1848,6 +1851,10 @@ impl Default for WeatherWidget {
 }
 
 impl WeatherWidget {
+    fn new(style: WeatherStyle) -> Self {
+        Self { style }
+    }
+
     fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
         self.style.view(weather, size)
     }
@@ -1863,12 +1870,14 @@ enum WeatherStatus {
 
 enum WeatherStyle {
     MinimalHalf(MinimalForecastHalf),
+    DetailedHalf(DetailedForecastHalf),
 }
 
 impl WeatherStyle {
     fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
         match self {
             Self::MinimalHalf(w) => w.view(weather, size),
+            Self::DetailedHalf(w) => w.view(weather, size),
         }
     }
 }
@@ -1884,7 +1893,7 @@ impl MinimalForecastHalf {
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
 
-        let icon_size = 200.0 * scale;
+        let icon_size = 100.0 * scale;
         let icon_x = w * 0.05;
         let icon_y = h / 2.0 + 200.0 * scale - icon_size - 20.0 * scale;
 
@@ -1995,6 +2004,249 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
     }
 }
 
+#[derive(Default)]
+struct DetailedForecastHalf {
+    cache: Cache,
+}
+
+impl DetailedForecastHalf {
+    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
+        let w = size.width / 2.0;
+        let h = size.height;
+        let scale = (w / 960.0).min(h / 1080.0);
+
+        let icon_size = 80.0 * scale;
+        let icon_x = w * 0.83;
+        let icon_y = h / 2.0 - 380.0 * scale - icon_size - 20.0 * scale;
+
+        let icon = match weather {
+            WeatherStatus::Ok(w_data) => {
+                let code = w_data.current.as_ref().unwrap().weather_code;
+                iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
+                    .into()
+            }
+            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
+                "../icons/clear.svg"
+            ))),
+        };
+
+        stack![
+            canvas((self, weather))
+                .width(Length::Fill)
+                .height(Length::Fill),
+            container(icon)
+                .padding(iced::padding::top(icon_y).left(icon_x))
+                .width(Length::Fill)
+                .height(Length::Fill)
+        ]
+        .into()
+    }
+}
+
+impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStatus) {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let (widget, weather) = self;
+        let palette = theme.extended_palette();
+
+        let static_layer = match weather {
+            WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.with_save(|frame| {
+                    let current = w.current.as_ref().unwrap();
+                    let daily = w.daily.as_ref().unwrap();
+
+                    let w = frame.width();
+                    let h = frame.height();
+
+                    let scale = w / 960.0;
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("Moscow"),
+                        size: Pixels(w.min(h) * 0.1),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y - 380.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}°", current.temperature_2m),
+                        size: Pixels(w.min(h) * 0.2),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y - 180.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("↑{}°", daily.apparent_temperature_max[0]),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y - 300.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("↓{}°", daily.apparent_temperature_min[0]),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y - 200.0 * scale.min(h / 1080.0),
+                        ),
+                        color: palette.secondary.base.color,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("Precip"),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y - 100.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: daily
+                            .precipitation_probability_max
+                            .iter()
+                            .enumerate()
+                            .find(|(_, num)| **num >= 30.0)
+                            .map_or("None for 7d".to_string(), |(i, &v)| {
+                                format!("{}% in {}d", v, i)
+                            }),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y - 100.0 * scale.min(h / 1080.0),
+                        ),
+                        color: palette.secondary.base.color,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("Wind"),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y + 50.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{} m/s", current.wind_speed_10m),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y + 50.0 * scale.min(h / 1080.0),
+                        ),
+                        color: palette.secondary.base.color,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("UVI"),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y + 200.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}", daily.uv_index_max[0]),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y + 200.0 * scale.min(h / 1080.0),
+                        ),
+                        color: palette.secondary.base.color,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("Feels Like"),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y + 350.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}°", current.apparent_temperature),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y + 350.0 * scale.min(h / 1080.0),
+                        ),
+                        color: palette.secondary.base.color,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+                });
+            }),
+            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+        };
+        vec![static_layer]
+    }
+}
+
 pub fn weekday_to_number(weekday: &Weekday) -> usize {
     match weekday {
         Weekday::Mon => 1,
@@ -2056,5 +2308,12 @@ fn wmo_code_svg(code: u8) -> &'static [u8] {
         // 80..=86 => include_bytes!("../assets/weather/wintry_mix.svg"),
         95..=99 => include_bytes!("../icons/thunderstorm.svg"),
         _ => include_bytes!("../icons/clear.svg"),
+    }
+}
+
+fn arrow_svg(direction: &str) -> &'static [u8] {
+    match direction {
+        "up" => include_bytes!("../icons/arrow-up-short.svg"),
+        &_ => include_bytes!("../icons/arrow-down-short.svg"),
     }
 }
