@@ -1,4 +1,5 @@
 use chrono::prelude::*;
+use geolocation::Locator;
 use iced::advanced::Renderer as AdvancedRenderer;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
@@ -1802,17 +1803,25 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
 
 #[derive(Clone, Debug, Deserialize, Default)]
 struct Weather {
+    city: Option<String>,
     current: Option<CurrentForecast>,
     daily: Option<DailyForecast>,
 }
 
 impl Weather {
     async fn fetch(&mut self) -> Result<(), reqwest::Error> {
+        let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
+
+        let info = geolocation::find(&ip).unwrap();
+
         let response: Weather = reqwest::get(
-            "https://api.open-meteo.com/v1/forecast?latitude=55.7569&longitude=37.6151&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature",
+            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature", info.latitude, info.longitude),
         ).await?.json::<Self>().await?;
 
-        *self = response;
+        *self = Weather {
+            city: Some(info.city.replace("\"", "")),
+            ..response
+        };
 
         Ok(())
     }
@@ -1900,15 +1909,23 @@ impl MinimalForecastHalf {
         let icon = match weather {
             WeatherStatus::Ok(w_data) => {
                 let code = w_data.current.as_ref().unwrap().weather_code;
-                iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .into()
+                if code == 0 || code == 1 && w_data.current.as_ref().unwrap().is_day == 0 {
+                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(100)))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else {
+                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                }
             }
             _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
                 "../icons/clear.svg"
             ))),
         };
+
         stack![
             canvas((self, weather))
                 .width(Length::Fill)
@@ -1936,6 +1953,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
         let static_layer = match weather {
             WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.with_save(|frame| {
+                    let city = w.city.as_ref().unwrap();
                     let current = w.current.as_ref().unwrap();
                     let daily = w.daily.as_ref().unwrap();
 
@@ -1945,7 +1963,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     let scale = w / 960.0;
 
                     frame.fill_text(canvas::Text {
-                        content: format!("Moscow"),
+                        content: format!("{}", city),
                         size: Pixels(w.min(h) * 0.1),
                         position: Point::new(
                             w * 0.05,
@@ -2022,10 +2040,17 @@ impl DetailedForecastHalf {
         let icon = match weather {
             WeatherStatus::Ok(w_data) => {
                 let code = w_data.current.as_ref().unwrap().weather_code;
-                iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .into()
+                if code == 0 || code == 1 && w_data.current.as_ref().unwrap().is_day == 0 {
+                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(100)))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else {
+                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                }
             }
             _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
                 "../icons/clear.svg"
@@ -2062,6 +2087,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
         let static_layer = match weather {
             WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.with_save(|frame| {
+                    let city = w.city.as_ref().unwrap();
                     let current = w.current.as_ref().unwrap();
                     let daily = w.daily.as_ref().unwrap();
 
@@ -2071,7 +2097,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     let scale = w / 960.0;
 
                     frame.fill_text(canvas::Text {
-                        content: format!("Moscow"),
+                        content: format!("{}", city),
                         size: Pixels(w.min(h) * 0.1),
                         position: Point::new(
                             w * 0.05,
@@ -2307,6 +2333,7 @@ fn wmo_code_svg(code: u8) -> &'static [u8] {
         // 77 => include_bytes!("../assets/weather/blizzard.svg"),
         // 80..=86 => include_bytes!("../assets/weather/wintry_mix.svg"),
         95..=99 => include_bytes!("../icons/thunderstorm.svg"),
+        100 => include_bytes!("../icons/clear-night.svg"),
         _ => include_bytes!("../icons/clear.svg"),
     }
 }
