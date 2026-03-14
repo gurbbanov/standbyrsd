@@ -32,6 +32,12 @@ const SF_PRO_ROUNDED_BLACK: Font = Font {
     ..Font::DEFAULT
 };
 
+const SF_PRO_DISPLAY_BOLD: Font = Font {
+    family: Family::Name("SF Pro Display"),
+    weight: Weight::Bold,
+    ..Font::DEFAULT
+};
+
 const SF_PRO_DISPLAY_BLACK: Font = Font {
     family: Family::Name("SF Pro Display"),
     weight: Weight::Black,
@@ -46,6 +52,7 @@ pub fn main() -> iced::Result {
                 include_bytes!("../fonts/SF-Pro-Rounded.ttf").into(),
                 include_bytes!("../fonts/SF-Pro-Expanded.ttf").into(),
                 include_bytes!("../fonts/SF-Pro-Display-Black.otf").into(),
+                include_bytes!("../fonts/SF-Pro-Display-Bold.otf").into(),
             ],
             default_font: Font {
                 family: Family::Name("SF Pro Rounded"),
@@ -352,7 +359,7 @@ impl Application {
             .page0_left
             .iter()
             .map(|w| {
-                container(w.view(&self.weather))
+                container(w.view(&self.weather, size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .style(|_| container::Style {
@@ -367,7 +374,7 @@ impl Application {
             .page0_right
             .iter()
             .map(|w| {
-                container(w.view(&self.weather))
+                container(w.view(&self.weather, size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .style(|_| container::Style {
@@ -406,7 +413,7 @@ impl Application {
             .page1_widgets
             .iter()
             .map(|w| {
-                container(w.view(&self.weather))
+                container(w.view(&self.weather, size))
                     .width(Length::Fixed(size.width))
                     .height(Length::Fixed(size.height))
                     .style(|_| container::Style {
@@ -937,11 +944,11 @@ enum AppWidget {
 }
 
 impl AppWidget {
-    pub fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
+    pub fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
         match self {
             AppWidget::Clock(w) => w.view(),
             AppWidget::Calendar(w) => w.view(),
-            AppWidget::Forecast(w) => w.view(weather),
+            AppWidget::Forecast(w) => w.view(weather, size),
         }
     }
 }
@@ -1841,8 +1848,8 @@ impl Default for WeatherWidget {
 }
 
 impl WeatherWidget {
-    fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
-        self.style.view(weather)
+    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
+        self.style.view(weather, size)
     }
 }
 
@@ -1859,9 +1866,9 @@ enum WeatherStyle {
 }
 
 impl WeatherStyle {
-    fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
+    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
         match self {
-            Self::MinimalHalf(w) => w.view(weather),
+            Self::MinimalHalf(w) => w.view(weather, size),
         }
     }
 }
@@ -1872,11 +1879,37 @@ struct MinimalForecastHalf {
 }
 
 impl MinimalForecastHalf {
-    fn view<'a>(&'a self, weather: &'a WeatherStatus) -> Element<'a, Message> {
-        canvas((self as &Self, weather))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
+        let w = size.width / 2.0;
+        let h = size.height;
+        let scale = (w / 960.0).min(h / 1080.0);
+
+        let icon_size = 200.0 * scale;
+        let icon_x = w * 0.05;
+        let icon_y = h / 2.0 + 200.0 * scale - icon_size - 20.0 * scale;
+
+        let icon = match weather {
+            WeatherStatus::Ok(w_data) => {
+                let code = w_data.current.as_ref().unwrap().weather_code;
+                iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
+                    .into()
+            }
+            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
+                "../icons/clear.svg"
+            ))),
+        };
+        stack![
+            canvas((self, weather))
+                .width(Length::Fill)
+                .height(Length::Fill),
+            container(icon)
+                .padding(iced::padding::top(icon_y).left(icon_x))
+                .width(Length::Fill)
+                .height(Length::Fill)
+        ]
+        .into()
     }
 }
 impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatus) {
@@ -1911,7 +1944,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                         ),
                         color: Color::WHITE,
                         align_y: iced::alignment::Vertical::Bottom,
-                        font: SF_PRO_DISPLAY_BLACK,
+                        font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
 
@@ -1934,7 +1967,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                         ),
                         color: Color::WHITE,
                         align_y: iced::alignment::Vertical::Bottom,
-                        font: SF_PRO_DISPLAY_BLACK,
+                        font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
 
@@ -1950,7 +1983,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                         ),
                         color: Color::WHITE,
                         align_y: iced::alignment::Vertical::Bottom,
-                        font: SF_PRO_DISPLAY_BLACK,
+                        font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
                 })
@@ -2002,5 +2035,26 @@ fn wmo_code_description(code: u8) -> &'static str {
         80..=86 => "Wintry mix",
         95..=99 => "Thunderstorm",
         _ => "n/a",
+    }
+}
+
+fn wmo_code_svg(code: u8) -> &'static [u8] {
+    match code {
+        0 | 1 => include_bytes!("../icons/clear.svg"),
+        // 1 => include_bytes!("../icons/mostly_clear.svg"),
+        2 => include_bytes!("../icons/partly_cloudy.svg"),
+        3 => include_bytes!("../icons/cloudy.svg"),
+        45..=48 => include_bytes!("../icons/fog.svg"),
+        51..=57 => include_bytes!("../icons/drizzle.svg"),
+        // 56..=57 => include_bytes!("../icons/freezing_drizzle.svg"),
+        61..=63 => include_bytes!("../icons/rain.svg"),
+        65 => include_bytes!("../icons/heavy_rain.svg"),
+        // 66..=67 => include_bytes!("../assets/weather/freezing_rain.svg"),
+        71..=73 => include_bytes!("../icons/snow.svg"),
+        // 75 => include_bytes!("../assets/weather/heavy_snow.svg"),
+        // 77 => include_bytes!("../assets/weather/blizzard.svg"),
+        // 80..=86 => include_bytes!("../assets/weather/wintry_mix.svg"),
+        95..=99 => include_bytes!("../icons/thunderstorm.svg"),
+        _ => include_bytes!("../icons/clear.svg"),
     }
 }
