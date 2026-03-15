@@ -1,5 +1,4 @@
 use chrono::prelude::*;
-use geolocation::Locator;
 use iced::advanced::Renderer as AdvancedRenderer;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
@@ -18,6 +17,7 @@ use iced::{
 use iced::{Pixels, mouse};
 use reqwest;
 use serde::Deserialize;
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 const SF_PRO_EXPANDED_BOLD: Font = Font {
@@ -360,7 +360,7 @@ impl Application {
             .page0_left
             .iter()
             .map(|w| {
-                container(w.view(&self.weather, size))
+                container(w.view(&self.time, &self.weather, size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .style(|_| container::Style {
@@ -375,7 +375,7 @@ impl Application {
             .page0_right
             .iter()
             .map(|w| {
-                container(w.view(&self.weather, size))
+                container(w.view(&self.time, &self.weather, size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .style(|_| container::Style {
@@ -414,7 +414,7 @@ impl Application {
             .page1_widgets
             .iter()
             .map(|w| {
-                container(w.view(&self.weather, size))
+                container(w.view(&self.time, &self.weather, size))
                     .width(Length::Fixed(size.width))
                     .height(Length::Fixed(size.height))
                     .style(|_| container::Style {
@@ -450,6 +450,9 @@ impl Default for Application {
                 AppWidget::Weather(WeatherWidget::default()),
                 AppWidget::Weather(WeatherWidget::new(WeatherStyle::DetailedHalf(
                     DetailedForecastHalf::default(),
+                ))),
+                AppWidget::Weather(WeatherWidget::new(WeatherStyle::DailyHalf(
+                    DailyForecastHalf::default(),
                 ))),
             ],
             page1_widgets: vec![
@@ -948,31 +951,41 @@ enum AppWidget {
 }
 
 impl AppWidget {
-    pub fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
+    pub fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        size: Size,
+    ) -> Element<'a, Message> {
         match self {
-            AppWidget::Clock(w) => w.view(),
-            AppWidget::Calendar(w) => w.view(),
-            AppWidget::Weather(w) => w.view(weather, size),
+            AppWidget::Clock(w) => w.view(time),
+            AppWidget::Calendar(w) => w.view(time),
+            AppWidget::Weather(w) => w.view(time, weather, size),
         }
     }
 }
 
 #[derive(Default)]
 struct CalendarWidget {
+    last_day: Cell<u32>,
     cache: Cache,
 }
 
 impl CalendarWidget {
-    fn view(&self) -> Element<'_, Message> {
-        self.cache.clear();
-        canvas(self as &Self)
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        if time.day() != self.last_day.get() {
+            self.last_day.set(time.day());
+            self.cache.clear();
+        }
+
+        canvas((self, time))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<Message> canvas::Program<Message> for CalendarWidget {
+impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) {
     type State = ();
 
     fn draw(
@@ -983,9 +996,9 @@ impl<Message> canvas::Program<Message> for CalendarWidget {
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let layer = self.cache.draw(renderer, bounds.size(), |frame| {
-            let now = chrono::Local::now();
+        let (widget, now) = self;
 
+        let layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let w = frame.width();
             let h = frame.height() * 0.9;
 
@@ -1112,8 +1125,8 @@ impl ClockWidget {
         Self { style }
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        self.style.view()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        self.style.view(time)
     }
 }
 
@@ -1125,12 +1138,12 @@ enum ClockStyle {
 }
 
 impl ClockStyle {
-    fn view(&self) -> Element<'_, Message> {
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
         match self {
-            ClockStyle::DigitalHalf(clock) => clock.view(),
-            ClockStyle::AnalogueHalf(clock) => clock.view(),
-            ClockStyle::MinimalHalf(clock) => clock.view(),
-            ClockStyle::AnalogueFull(clock) => clock.view(),
+            ClockStyle::DigitalHalf(clock) => clock.view(time),
+            ClockStyle::AnalogueHalf(clock) => clock.view(time),
+            ClockStyle::MinimalHalf(clock) => clock.view(time),
+            ClockStyle::AnalogueFull(clock) => clock.view(time),
         }
     }
 }
@@ -1141,16 +1154,16 @@ struct DigitalClockHalf {
 }
 
 impl DigitalClockHalf {
-    fn view(&self) -> Element<'_, Message> {
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
         self.cache.clear();
-        canvas(self as &Self)
+        canvas((self, time))
             .height(Length::Fill)
             .width(Length::Fill)
             .into()
     }
 }
 
-impl<Message> canvas::Program<Message> for DigitalClockHalf {
+impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>) {
     type State = ();
 
     fn draw(
@@ -1161,26 +1174,27 @@ impl<Message> canvas::Program<Message> for DigitalClockHalf {
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let clock = self.cache.draw(renderer, bounds.size(), |frame| {
+        let (widget, now) = self;
+
+        let clock = widget.cache.draw(renderer, bounds.size(), |frame| {
             let palette = theme.extended_palette();
 
             let center = frame.center();
             let width = frame.width() / 2.0;
 
-            let now = chrono::Local::now();
             let font_size = width * 0.6;
 
             // часы
             frame.fill_text(canvas::Text {
                 content: format!("{:02}", now.hour()),
                 position: Point {
-                    x: center.x - font_size * 0.8,
+                    x: center.x - font_size * 0.2,
                     y: center.y,
                 },
                 size: font_size.into(),
                 color: palette.secondary.base.text,
                 font: SF_PRO_ROUNDED_BLACK,
-                align_x: text::Alignment::Center,
+                align_x: text::Alignment::Right,
                 align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
             });
@@ -1202,13 +1216,13 @@ impl<Message> canvas::Program<Message> for DigitalClockHalf {
             frame.fill_text(canvas::Text {
                 content: format!("{:02}", now.minute()),
                 position: Point {
-                    x: center.x + font_size * 0.8,
+                    x: center.x + font_size * 0.2,
                     y: center.y,
                 },
                 size: font_size.into(),
                 color: palette.secondary.base.text,
                 font: SF_PRO_ROUNDED_BLACK,
-                align_x: text::Alignment::Center,
+                align_x: text::Alignment::Left,
                 align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
             });
@@ -1225,8 +1239,8 @@ struct AnalogueClockHalf {
 }
 
 impl AnalogueClockHalf {
-    fn view(&self) -> Element<'_, Message> {
-        stack![self.clock_frame.view(), self.hands.view()].into()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        stack![self.clock_frame.view(), self.hands.view(time)].into()
     }
 }
 
@@ -1236,17 +1250,17 @@ struct Hands {
 }
 
 impl Hands {
-    fn view(&self) -> Element<'_, Message> {
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
         self.cache.clear();
 
-        canvas(self as &Self)
+        canvas((self, time))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<Message> canvas::Program<Message> for Hands {
+impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
     type State = ();
 
     fn draw(
@@ -1258,10 +1272,9 @@ impl<Message> canvas::Program<Message> for Hands {
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let palette = theme.extended_palette();
+        let (widget, now) = self;
 
-        let dynamic_layer = self.cache.draw(renderer, bounds.size(), |frame| {
-            let now = chrono::Local::now();
-
+        let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
 
             let center = frame.center();
@@ -1453,8 +1466,8 @@ struct MinimalClockHalf {
 }
 
 impl MinimalClockHalf {
-    fn view(&self) -> Element<'_, Message> {
-        stack![self.clock_frame.view(), self.hands.view()].into()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        stack![self.clock_frame.view(), self.hands.view(time)].into()
     }
 }
 
@@ -1522,26 +1535,31 @@ struct AnalogueClockFull {
 }
 
 impl AnalogueClockFull {
-    fn view(&self) -> Element<'_, Message> {
-        stack![self.clock_frame.view(), self.hands.view()].into()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        stack![self.clock_frame.view(time), self.hands.view(time)].into()
     }
 }
 
 #[derive(Default)]
 struct ClockFrameAnalogueFull {
+    last_day: Cell<u32>,
     cache: Cache,
 }
 
 impl ClockFrameAnalogueFull {
-    fn view(&self) -> Element<'_, Message> {
-        canvas(self as &Self)
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        if time.day() != self.last_day.get() {
+            self.last_day.set(time.day());
+            self.cache.clear();
+        }
+        canvas((self, time))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
+impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<Local>) {
     type State = ();
 
     fn draw(
@@ -1552,9 +1570,10 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
+        let (widget, time) = self;
         let palette = theme.extended_palette();
 
-        let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
+        let static_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
 
             let padding = scale * 70.0;
@@ -1742,10 +1761,8 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                     );
                 }
 
-                let now = chrono::Local::now();
-
                 frame.fill_text(canvas::Text {
-                    content: now.weekday().to_string().to_uppercase(),
+                    content: time.weekday().to_string().to_uppercase(),
                     size: iced::Pixels(50.0 * scale),
                     position: Point::new(frame.width() * 2.0 / 3.0, frame.center().y),
                     color: color!(255, 0, 0),
@@ -1756,7 +1773,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueFull {
                 });
 
                 frame.fill_text(canvas::Text {
-                    content: now.day().to_string(),
+                    content: time.day().to_string(),
                     size: iced::Pixels(50.0 * scale),
                     position: Point::new(
                         frame.width() * 2.0 / 3.0 + 110.0 * scale,
@@ -1843,7 +1860,7 @@ struct DailyForecast {
     apparent_temperature_max: Vec<f32>,
     apparent_temperature_min: Vec<f32>,
     precipitation_probability_max: Vec<f32>,
-    weather_code: Vec<i32>,
+    weather_code: Vec<u8>,
     uv_index_max: Vec<f32>,
 }
 
@@ -1864,8 +1881,13 @@ impl WeatherWidget {
         Self { style }
     }
 
-    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
-        self.style.view(weather, size)
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        size: Size,
+    ) -> Element<'a, Message> {
+        self.style.view(time, weather, size)
     }
 }
 
@@ -1880,13 +1902,20 @@ enum WeatherStatus {
 enum WeatherStyle {
     MinimalHalf(MinimalForecastHalf),
     DetailedHalf(DetailedForecastHalf),
+    DailyHalf(DailyForecastHalf),
 }
 
 impl WeatherStyle {
-    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        size: Size,
+    ) -> Element<'a, Message> {
         match self {
             Self::MinimalHalf(w) => w.view(weather, size),
             Self::DetailedHalf(w) => w.view(weather, size),
+            Self::DailyHalf(w) => w.view(time, weather, size),
         }
     }
 }
@@ -1906,10 +1935,10 @@ impl MinimalForecastHalf {
         let icon_x = w * 0.05;
         let icon_y = h / 2.0 + 200.0 * scale - icon_size - 20.0 * scale;
 
-        let icon = match weather {
+        let icon: Element<Message> = match weather {
             WeatherStatus::Ok(w_data) => {
                 let code = w_data.current.as_ref().unwrap().weather_code;
-                if code == 0 || code == 1 && w_data.current.as_ref().unwrap().is_day == 0 {
+                if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
                     iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(100)))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
@@ -1921,9 +1950,11 @@ impl MinimalForecastHalf {
                         .into()
                 }
             }
+            WeatherStatus::Error(e) => button("Retry").on_press(Message::FetchWeather).into(),
             _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
                 "../icons/clear.svg"
-            ))),
+            )))
+            .into(),
         };
 
         stack![
@@ -1976,7 +2007,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{}°", current.temperature_2m),
+                        content: format!("{:.0}°", current.temperature_2m),
                         size: Pixels(w.min(h) * 0.33),
                         position: Point::new(w * 0.05, frame.center().y),
                         color: Color::WHITE,
@@ -2000,7 +2031,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
 
                     frame.fill_text(canvas::Text {
                         content: format!(
-                            "H:{}° L:{}°",
+                            "H:{:.0}° L:{:.0}°",
                             daily.apparent_temperature_max[0], daily.apparent_temperature_min[0]
                         ),
                         size: Pixels(w.min(h) * 0.08),
@@ -2040,7 +2071,7 @@ impl DetailedForecastHalf {
         let icon = match weather {
             WeatherStatus::Ok(w_data) => {
                 let code = w_data.current.as_ref().unwrap().weather_code;
-                if code == 0 || code == 1 && w_data.current.as_ref().unwrap().is_day == 0 {
+                if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
                     iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(100)))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
@@ -2110,7 +2141,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{}°", current.temperature_2m),
+                        content: format!("{:.0}°", current.temperature_2m),
                         size: Pixels(w.min(h) * 0.2),
                         position: Point::new(
                             w * 0.05,
@@ -2123,7 +2154,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("↑{}°", daily.apparent_temperature_max[0]),
+                        content: format!("↑{:.0}°", daily.apparent_temperature_max[0]),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -2137,7 +2168,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("↓{}°", daily.apparent_temperature_min[0]),
+                        content: format!("↓{:.0}°", daily.apparent_temperature_min[0]),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -2252,7 +2283,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{}°", current.apparent_temperature),
+                        content: format!("{:.0}°", current.apparent_temperature),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -2264,6 +2295,289 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
+                });
+            }),
+            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+        };
+        vec![static_layer]
+    }
+}
+
+#[derive(Default)]
+struct DailyForecastHalf {
+    cache: Cache,
+}
+
+impl DailyForecastHalf {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        size: Size,
+    ) -> Element<'a, Message> {
+        let w = size.width / 2.0;
+        let h = size.height;
+        let scale = (w / 960.0).min(h / 1080.0);
+
+        let icon_size = 80.0 * scale;
+        let icon_x = w * 0.83;
+        let icon_y = h / 2.0 - 380.0 * scale - icon_size - 20.0 * scale;
+
+        let (icon, daily_icons): (Element<Message>, Vec<Element<Message>>) = match weather {
+            WeatherStatus::Ok(w_data) => {
+                let current = w_data.current.as_ref().unwrap();
+                let code = if (current.weather_code == 0 || current.weather_code == 1)
+                    && current.is_day == 0
+                {
+                    100u8
+                } else {
+                    current.weather_code as u8
+                };
+
+                let current_icon =
+                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into();
+
+                let daily = w_data.daily.as_ref();
+
+                let icons = match daily {
+                    Some(d) => (1..=4)
+                        .filter_map(|i| d.weather_code.get(i).copied())
+                        .map(|code| {
+                            iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(
+                                code as u8,
+                            )))
+                            .width(Length::Fixed(icon_size * 1.3))
+                            .height(Length::Fixed(icon_size * 1.3))
+                            .into()
+                        })
+                        .collect(),
+                    None => vec![],
+                };
+
+                (current_icon, icons)
+            }
+            _ => (
+                iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
+                    "../icons/clear.svg"
+                )))
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size))
+                .into(),
+                vec![],
+            ),
+        };
+
+        let daily_column = column(daily_icons).spacing(45.0 * scale);
+
+        stack![
+            canvas((self, time, weather))
+                .width(Length::Fill)
+                .height(Length::Fill),
+            container(icon)
+                .padding(iced::padding::top(icon_y).left(icon_x))
+                .width(Length::Fill)
+                .height(Length::Fill),
+            container(daily_column)
+                .padding(iced::padding::top(h / 2.0 - 180.0 * scale - 20.0 * scale).left(w * 0.3))
+                .width(Length::Fill)
+                .height(Length::Fill)
+        ]
+        .into()
+    }
+}
+
+impl<'a> canvas::Program<Message>
+    for (
+        &'a DailyForecastHalf,
+        &'a DateTime<Local>,
+        &'a WeatherStatus,
+    )
+{
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let (widget, time, weather) = self;
+        let palette = theme.extended_palette();
+
+        let weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        let today = weekday_to_number(&time.weekday());
+
+        let mut curr_padding = -100.0;
+        let mut counter = 0;
+
+        let static_layer = match weather {
+            WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.with_save(|frame| {
+                    let city = w.city.as_ref().unwrap();
+                    let current = w.current.as_ref().unwrap();
+                    let daily = w.daily.as_ref().unwrap();
+
+                    let w = frame.width();
+                    let h = frame.height();
+
+                    let scale = w / 960.0;
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}", city),
+                        size: Pixels(w.min(h) * 0.1),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y - 380.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{:.0}°", current.temperature_2m),
+                        size: Pixels(w.min(h) * 0.2),
+                        position: Point::new(
+                            w * 0.05,
+                            frame.center().y - 180.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("↑{:.0}°", daily.apparent_temperature_max[0]),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y - 300.0 * scale.min(h / 1080.0),
+                        ),
+                        color: Color::WHITE,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("↓{:.0}°", daily.apparent_temperature_min[0]),
+                        size: Pixels(w.min(h) * 0.08),
+                        position: Point::new(
+                            w * 0.95,
+                            frame.center().y - 200.0 * scale.min(h / 1080.0),
+                        ),
+                        color: palette.secondary.base.color,
+                        align_y: iced::alignment::Vertical::Bottom,
+                        align_x: text::Alignment::Right,
+                        font: SF_PRO_DISPLAY_BOLD,
+                        ..canvas::Text::default()
+                    });
+
+                    for weekday in today + 1..7 {
+                        frame.fill_text(canvas::Text {
+                            content: format!("{}", weekdays[weekday]),
+                            size: Pixels(w.min(h) * 0.08),
+                            position: Point::new(
+                                w * 0.05,
+                                frame.center().y + curr_padding * scale.min(h / 1080.0),
+                            ),
+                            color: Color::WHITE,
+                            align_y: iced::alignment::Vertical::Bottom,
+                            font: SF_PRO_DISPLAY_BOLD,
+                            ..canvas::Text::default()
+                        });
+
+                        frame.fill_text(canvas::Text {
+                            content: format!("{:.0}°", daily.apparent_temperature_min[counter]),
+                            size: Pixels(w.min(h) * 0.08),
+                            position: Point::new(
+                                w * 0.80,
+                                frame.center().y + curr_padding * scale.min(h / 1080.0),
+                            ),
+                            color: palette.secondary.base.color,
+                            align_y: iced::alignment::Vertical::Bottom,
+                            align_x: text::Alignment::Right,
+                            font: SF_PRO_DISPLAY_BOLD,
+                            ..canvas::Text::default()
+                        });
+
+                        frame.fill_text(canvas::Text {
+                            content: format!("{:.0}°", daily.apparent_temperature_max[counter]),
+                            size: Pixels(w.min(h) * 0.08),
+                            position: Point::new(
+                                w * 0.95,
+                                frame.center().y + curr_padding * scale.min(h / 1080.0),
+                            ),
+                            color: Color::WHITE,
+                            align_y: iced::alignment::Vertical::Bottom,
+                            align_x: text::Alignment::Right,
+                            font: SF_PRO_DISPLAY_BOLD,
+                            ..canvas::Text::default()
+                        });
+
+                        curr_padding += 150.0;
+                        counter += 1;
+                        if counter == 4 {
+                            break;
+                        }
+                    }
+
+                    if counter != 4 {
+                        for weekday in 0..(4 as i32 - counter as i32).abs() as usize {
+                            frame.fill_text(canvas::Text {
+                                content: format!("{}", weekdays[weekday]),
+                                size: Pixels(w.min(h) * 0.08),
+                                position: Point::new(
+                                    w * 0.05,
+                                    frame.center().y + curr_padding * scale.min(h / 1080.0),
+                                ),
+                                color: Color::WHITE,
+                                align_y: iced::alignment::Vertical::Bottom,
+                                font: SF_PRO_DISPLAY_BOLD,
+                                ..canvas::Text::default()
+                            });
+
+                            frame.fill_text(canvas::Text {
+                                content: format!("{:.0}°", daily.apparent_temperature_min[counter]),
+                                size: Pixels(w.min(h) * 0.08),
+                                position: Point::new(
+                                    w * 0.80,
+                                    frame.center().y + curr_padding * scale.min(h / 1080.0),
+                                ),
+                                color: palette.secondary.base.color,
+                                align_y: iced::alignment::Vertical::Bottom,
+                                align_x: text::Alignment::Right,
+                                font: SF_PRO_DISPLAY_BOLD,
+                                ..canvas::Text::default()
+                            });
+
+                            frame.fill_text(canvas::Text {
+                                content: format!("{:.0}°", daily.apparent_temperature_max[counter]),
+                                size: Pixels(w.min(h) * 0.08),
+                                position: Point::new(
+                                    w * 0.95,
+                                    frame.center().y + curr_padding * scale.min(h / 1080.0),
+                                ),
+                                color: Color::WHITE,
+                                align_y: iced::alignment::Vertical::Bottom,
+                                align_x: text::Alignment::Right,
+                                font: SF_PRO_DISPLAY_BOLD,
+                                ..canvas::Text::default()
+                            });
+
+                            curr_padding += 150.0;
+                            counter += 1;
+                        }
+                    }
                 });
             }),
             WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {}),
