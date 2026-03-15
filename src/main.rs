@@ -1833,7 +1833,10 @@ impl Weather {
 
         let response: Weather = reqwest::get(
             format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature", info.latitude, info.longitude),
-        ).await?.json::<Self>().await?;
+        )
+        .await?
+        .json::<Self>()
+        .await?;
 
         *self = Weather {
             city: Some(info.city.replace("\"", "")),
@@ -1950,11 +1953,11 @@ impl MinimalForecastHalf {
                         .into()
                 }
             }
-            WeatherStatus::Error(e) => button("Retry").on_press(Message::FetchWeather).into(),
-            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
-                "../icons/clear.svg"
-            )))
-            .into(),
+            // WeatherStatus::Error(e) => button("Retry").on_press(Message::FetchWeather).into(),
+            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(255)))
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size))
+                .into(),
         };
 
         stack![
@@ -1980,7 +1983,9 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
+        let palette = theme.extended_palette();
         let (widget, weather) = self;
+
         let static_layer = match weather {
             WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.with_save(|frame| {
@@ -2046,8 +2051,30 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     });
                 })
             }),
-            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {}),
-            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.fill_text(canvas::Text {
+                    content: String::from("Weather\nis loading"),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+                    position: frame.center(),
+                    color: palette.secondary.base.color,
+                    align_y: iced::alignment::Vertical::Center,
+                    align_x: text::Alignment::Center,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+            }),
+            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.fill_text(canvas::Text {
+                    content: String::from("Weather\nUnavailable"),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+                    position: frame.center(),
+                    color: palette.secondary.base.color,
+                    align_y: iced::alignment::Vertical::Center,
+                    align_x: text::Alignment::Center,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+            }),
         };
         vec![static_layer]
     }
@@ -2083,9 +2110,9 @@ impl DetailedForecastHalf {
                         .into()
                 }
             }
-            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
-                "../icons/clear.svg"
-            ))),
+            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(255)))
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size)),
         };
 
         stack![
@@ -2297,8 +2324,30 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
                 });
             }),
-            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {}),
-            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.fill_text(canvas::Text {
+                    content: String::from("Weather\nis loading"),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+                    position: frame.center(),
+                    color: palette.secondary.base.color,
+                    align_y: iced::alignment::Vertical::Center,
+                    align_x: text::Alignment::Center,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+            }),
+            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.fill_text(canvas::Text {
+                    content: String::from("Weather\nUnavailable"),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+                    position: frame.center(),
+                    color: palette.secondary.base.color,
+                    align_y: iced::alignment::Vertical::Center,
+                    align_x: text::Alignment::Center,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+            }),
         };
         vec![static_layer]
     }
@@ -2332,7 +2381,7 @@ impl DailyForecastHalf {
                 {
                     100u8
                 } else {
-                    current.weather_code as u8
+                    current.weather_code
                 };
 
                 let current_icon =
@@ -2348,7 +2397,7 @@ impl DailyForecastHalf {
                         .filter_map(|i| d.weather_code.get(i).copied())
                         .map(|code| {
                             iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(
-                                code as u8,
+                                code,
                             )))
                             .width(Length::Fixed(icon_size * 1.3))
                             .height(Length::Fixed(icon_size * 1.3))
@@ -2361,12 +2410,10 @@ impl DailyForecastHalf {
                 (current_icon, icons)
             }
             _ => (
-                iced::widget::svg(iced::widget::svg::Handle::from_memory(include_bytes!(
-                    "../icons/clear.svg"
-                )))
-                .width(Length::Fixed(icon_size))
-                .height(Length::Fixed(icon_size))
-                .into(),
+                iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(255)))
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
+                    .into(),
                 vec![],
             ),
         };
@@ -2414,7 +2461,7 @@ impl<'a> canvas::Program<Message>
         let today = weekday_to_number(&time.weekday());
 
         let mut curr_padding = -100.0;
-        let mut counter = 0;
+        let mut counter = 1;
 
         let static_layer = match weather {
             WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
@@ -2526,13 +2573,13 @@ impl<'a> canvas::Program<Message>
 
                         curr_padding += 150.0;
                         counter += 1;
-                        if counter == 4 {
+                        if counter == 5 {
                             break;
                         }
                     }
 
-                    if counter != 4 {
-                        for weekday in 0..(4 as i32 - counter as i32).abs() as usize {
+                    if counter != 5 {
+                        for weekday in 0..(5 as i32 - counter as i32).abs() as usize {
                             frame.fill_text(canvas::Text {
                                 content: format!("{}", weekdays[weekday]),
                                 size: Pixels(w.min(h) * 0.08),
@@ -2580,8 +2627,30 @@ impl<'a> canvas::Program<Message>
                     }
                 });
             }),
-            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {}),
-            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {}),
+            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.fill_text(canvas::Text {
+                    content: String::from("Weather\nis loading"),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+                    position: frame.center(),
+                    color: palette.secondary.base.color,
+                    align_y: iced::alignment::Vertical::Center,
+                    align_x: text::Alignment::Center,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+            }),
+            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
+                frame.fill_text(canvas::Text {
+                    content: String::from("Weather\nUnavailable"),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+                    position: frame.center(),
+                    color: palette.secondary.base.color,
+                    align_y: iced::alignment::Vertical::Center,
+                    align_x: text::Alignment::Center,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+            }),
         };
         vec![static_layer]
     }
@@ -2648,13 +2717,15 @@ fn wmo_code_svg(code: u8) -> &'static [u8] {
         // 80..=86 => include_bytes!("../assets/weather/wintry_mix.svg"),
         95..=99 => include_bytes!("../icons/thunderstorm.svg"),
         100 => include_bytes!("../icons/clear-night.svg"),
-        _ => include_bytes!("../icons/clear.svg"),
+        _ => include_bytes!("../icons/warning.svg"),
     }
 }
 
 fn arrow_svg(direction: &str) -> &'static [u8] {
     match direction {
         "up" => include_bytes!("../icons/arrow-up-short.svg"),
+        "down" => include_bytes!("../icons/arrow-down-short.svg"),
+        "repeat" => include_bytes!("../icons/arrow-repeat.svg"),
         &_ => include_bytes!("../icons/arrow-down-short.svg"),
     }
 }
