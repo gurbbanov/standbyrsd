@@ -5,26 +5,28 @@ use iced::advanced::renderer;
 use iced::advanced::widget::{self};
 use iced::advanced::{Clipboard, Shell};
 use iced::border::Radius;
-use iced::font::{Family, Weight};
+use iced::font::{Family, Stretch, Style, Weight};
+use iced::theme::{Base, Palette};
 use iced::time::{self, milliseconds, seconds};
 use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
-use iced::widget::{button, canvas, center, column, container, responsive, row, stack, text};
+use iced::widget::{button, canvas, center, column, container, responsive, row, stack, svg, text};
 use iced::window::{self, Id};
 use iced::{
-    Alignment, Color, Degrees, Element, Event, Font, Length, Point, Radians, Rectangle, Renderer,
-    Settings, Size, Subscription, Task, Theme, Vector, color,
+    Alignment, Color, Degrees, Element, Font, Length, Point, Radians, Rectangle, Renderer,
+    Settings, Size, Subscription, Task, Theme, Vector, alignment, color, padding,
 };
 use iced::{Pixels, mouse};
+use iced_anim::{Animated, Animation, Easing};
 use reqwest;
 use serde::Deserialize;
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 const SF_PRO_EXPANDED_BOLD: Font = Font {
-    family: iced::font::Family::Name("SF Pro"),
-    weight: iced::font::Weight::Bold,
-    stretch: iced::font::Stretch::Expanded,
-    style: iced::font::Style::Normal,
+    family: Family::Name("SF Pro"),
+    weight: Weight::Bold,
+    stretch: Stretch::Expanded,
+    style: Style::Normal,
 };
 
 const SF_PRO_ROUNDED_BLACK: Font = Font {
@@ -62,7 +64,7 @@ pub fn main() -> iced::Result {
             },
             ..Settings::default()
         })
-        .theme(Theme::Moonfly)
+        .theme(Application::theme)
         .antialiasing(true)
         .run()
 }
@@ -112,6 +114,7 @@ struct Application {
     page0_left: Vec<AppWidget>,
     page0_right: Vec<AppWidget>,
     page1_widgets: Vec<AppWidget>,
+    theme: Animated<Theme>,
     fullscreen: bool,
     main_window: Option<window::Id>,
     current_page: usize,
@@ -126,6 +129,8 @@ enum Message {
     WeatherFetched(WeatherStatus),
     OpenMainWindow,
     WindowOpened(Id),
+    ToggleTheme,
+    AnimateTheme(iced_anim::Event<Theme>),
     ToggleFullscreen,
     DragDelta(f32),
     SnapTick(Instant),
@@ -174,6 +179,10 @@ impl Application {
         }
     }
 
+    fn theme(&self, _id: Id) -> Theme {
+        self.theme.value().clone()
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick(local_time) => {
@@ -218,6 +227,50 @@ impl Application {
             }
             Message::WindowOpened(id) => {
                 self.main_window = Some(id);
+                Task::none()
+            }
+            Message::ToggleTheme => {
+                if self.theme.value().name() == "classic" {
+                    self.theme.update(iced_anim::Event::from(Theme::custom(
+                        "red_dark".to_string(),
+                        Palette {
+                            text: Color::from_rgb(1.0, 0.0, 0.0),
+                            background: Color::from_rgb(0.0, 0.0, 0.0),
+                            primary: color!(246, 0, 1),
+                            success: color!(0, 0, 0),
+                            warning: Color::from_rgb(1.0, 0.0, 0.0),
+                            danger: color!(87, 4, 4),
+                        },
+                    )));
+                } else {
+                    self.theme.update(iced_anim::Event::from(Theme::custom(
+                        "classic".to_string(),
+                        Palette {
+                            text: Color::WHITE,
+                            primary: color!(169, 169, 169),
+                            danger: color!(87, 87, 87),
+                            background: color!(0, 0, 0),
+                            success: Color::WHITE,
+                            ..Theme::Moonfly.palette()
+                        },
+                    )));
+                }
+
+                Task::none()
+            }
+            Message::AnimateTheme(event) => {
+                self.theme.update(event);
+                for w in &self.page0_left {
+                    w.clear_cache();
+                }
+
+                for w in &self.page0_right {
+                    w.clear_cache();
+                }
+
+                for w in &self.page1_widgets {
+                    w.clear_cache();
+                }
                 Task::none()
             }
             Message::ToggleFullscreen => {
@@ -315,38 +368,42 @@ impl Application {
 
     fn view(&self, _id: Id) -> Element<'_, Message> {
         match self.main_window {
-            Some(_id) => responsive(move |size| {
-                let total_offset: f32 = match &self.drag {
-                    DragState::Idle => -(self.current_page as f32) * size.width,
-                    DragState::Active { offset_px, .. } => {
-                        -(self.current_page as f32) * size.width + offset_px
-                    }
-                    DragState::Snapping {
-                        start_offset,
-                        end_offset,
-                        velocity,
-                        started_at,
-                    } => {
-                        let elapsed = started_at.elapsed().as_secs_f32();
-                        let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
-                        let dist = end_offset - start_offset;
-                        let v0 = if dist.abs() > 0.001 {
-                            velocity / dist
-                        } else {
-                            0.0
-                        };
-                        start_offset + dist * ease_spring(t, v0)
-                    }
-                };
+            Some(_id) => Animation::new(
+                &self.theme,
+                responsive(move |size| {
+                    let total_offset: f32 = match &self.drag {
+                        DragState::Idle => -(self.current_page as f32) * size.width,
+                        DragState::Active { offset_px, .. } => {
+                            -(self.current_page as f32) * size.width + offset_px
+                        }
+                        DragState::Snapping {
+                            start_offset,
+                            end_offset,
+                            velocity,
+                            started_at,
+                        } => {
+                            let elapsed = started_at.elapsed().as_secs_f32();
+                            let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
+                            let dist = end_offset - start_offset;
+                            let v0 = if dist.abs() > 0.001 {
+                                velocity / dist
+                            } else {
+                                0.0
+                            };
+                            start_offset + dist * ease_spring(t, v0)
+                        }
+                    };
 
-                slide_pages(
-                    total_offset,
-                    size.width,
-                    size.height,
-                    self.page0(size),
-                    self.page1(size),
-                )
-            })
+                    slide_pages(
+                        total_offset,
+                        size.width,
+                        size.height,
+                        self.page0(size),
+                        self.page1(size),
+                    )
+                }),
+            )
+            .on_update(Message::AnimateTheme)
             .into(),
             None => container(text("window is closed")).into(),
         }
@@ -363,10 +420,6 @@ impl Application {
                 container(w.view(&self.time, &self.weather, size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
-                    .style(|_| container::Style {
-                        background: Some(Color::BLACK.into()),
-                        ..Default::default()
-                    })
                     .into()
             })
             .collect();
@@ -378,10 +431,6 @@ impl Application {
                 container(w.view(&self.time, &self.weather, size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
-                    .style(|_| container::Style {
-                        background: Some(Color::BLACK.into()),
-                        ..Default::default()
-                    })
                     .into()
             })
             .collect();
@@ -389,21 +438,22 @@ impl Application {
         let left = vertical_carousel(left_items, sw, sh);
         let right = vertical_carousel(right_items, sw, sh);
 
+        let dark_btn: Element<Message> = button("dark mode").on_press(Message::ToggleTheme).into();
+
         container(row![
             left,
             column![
-                container(button("fullscreen").on_press(Message::ToggleFullscreen))
-                    .width(Length::Fill)
-                    .align_x(Alignment::End),
+                row![
+                    dark_btn,
+                    container(button("fullscreen").on_press(Message::ToggleFullscreen))
+                        .width(Length::Fill)
+                        .align_x(Alignment::End)
+                ],
                 right,
             ]
             .width(Length::Fixed(sw))
             .height(Length::Fixed(sh)),
         ])
-        .style(|_| container::Style {
-            background: Some(Color::BLACK.into()),
-            ..Default::default()
-        })
         .width(Length::Fixed(size.width))
         .height(Length::Fixed(size.height))
         .into()
@@ -417,10 +467,6 @@ impl Application {
                 container(w.view(&self.time, &self.weather, size))
                     .width(Length::Fixed(size.width))
                     .height(Length::Fixed(size.height))
-                    .style(|_| container::Style {
-                        background: Some(Color::BLACK.into()),
-                        ..Default::default()
-                    })
                     .into()
             })
             .collect();
@@ -463,6 +509,20 @@ impl Default for Application {
                     AnalogueClockFull::default(),
                 ))),
             ],
+            theme: Animated::new(
+                Theme::custom(
+                    "classic".to_string(),
+                    Palette {
+                        text: Color::WHITE,
+                        primary: color!(169, 169, 169),
+                        danger: color!(87, 87, 87),
+                        background: color!(0, 0, 0),
+                        success: Color::WHITE,
+                        ..Theme::Moonfly.palette()
+                    },
+                ),
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
             fullscreen: false,
             main_window: None,
             current_page: 0,
@@ -587,7 +647,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
     fn update(
         &mut self,
         tree: &mut widget::Tree,
-        event: &Event,
+        event: &iced::Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
@@ -599,7 +659,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
 
         shell.publish(Message::UpdatePageWidth(bounds.width));
 
-        if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
+        if let iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
             if cursor.is_over(bounds) {
                 let dx = match delta {
                     mouse::ScrollDelta::Pixels { x, .. } => *x * 2.0,
@@ -854,7 +914,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
     fn update(
         &mut self,
         tree: &mut widget::Tree,
-        event: &Event,
+        event: &iced::Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
@@ -881,7 +941,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
                 }
             }
 
-            if let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
+            if let iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
                 if cursor.is_over(bounds) && state.snap.is_none() {
                     let dy = match delta {
                         mouse::ScrollDelta::Pixels { y, .. } => *y * 2.0,
@@ -963,20 +1023,32 @@ impl AppWidget {
             AppWidget::Weather(w) => w.view(time, weather, size),
         }
     }
+
+    pub fn clear_cache(&self) {
+        match self {
+            AppWidget::Clock(w) => w.clear_cache(),
+            AppWidget::Calendar(w) => w.clear_cache(),
+            AppWidget::Weather(w) => w.clear_cache(),
+        }
+    }
+}
+
+trait ClearCache {
+    fn clear_cache(&self);
 }
 
 #[derive(Default)]
 struct CalendarWidget {
-    last_day: Cell<u32>,
+    // last_day: Cell<u32>,
     cache: Cache,
 }
 
 impl CalendarWidget {
     fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        if time.day() != self.last_day.get() {
-            self.last_day.set(time.day());
-            self.cache.clear();
-        }
+        // if time.day() != self.last_day.get() {
+        //     self.last_day.set(time.day());
+        //     self.cache.clear();
+        // }
 
         canvas((self, time))
             .width(Length::Fill)
@@ -992,11 +1064,12 @@ impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) 
         &self,
         _state: &Self::State,
         renderer: &Renderer,
-        _theme: &Theme,
-        bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, now) = self;
+        let palette = theme.palette();
 
         let layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let w = frame.width();
@@ -1040,7 +1113,7 @@ impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) 
                 color: color!(255, 0, 0),
                 font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Left,
-                align_y: iced::alignment::Vertical::Center,
+                align_y: alignment::Vertical::Center,
                 ..canvas::Text::default()
             });
 
@@ -1055,13 +1128,13 @@ impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) 
                     position: Point::new(x, y),
                     size: font_size.into(),
                     color: if is_weekend {
-                        color!(87, 87, 87)
+                        palette.danger
                     } else {
-                        Color::WHITE
+                        palette.text
                     },
                     font: SF_PRO_ROUNDED_BLACK,
                     align_x: text::Alignment::Center,
-                    align_y: iced::alignment::Vertical::Center,
+                    align_y: alignment::Vertical::Center,
                     ..canvas::Text::default()
                 });
             }
@@ -1088,15 +1161,15 @@ impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) 
                     position: Point::new(x, y),
                     size: font_size.into(),
                     color: if is_today {
-                        Color::WHITE
+                        palette.success
                     } else if is_weekend {
-                        color!(87, 87, 87)
+                        palette.danger
                     } else {
-                        Color::WHITE
+                        palette.text
                     },
                     font: SF_PRO_ROUNDED_BLACK,
                     align_x: text::Alignment::Center,
-                    align_y: iced::alignment::Vertical::Center,
+                    align_y: alignment::Vertical::Center,
                     ..canvas::Text::default()
                 });
 
@@ -1105,6 +1178,12 @@ impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) 
         });
 
         vec![layer]
+    }
+}
+
+impl ClearCache for CalendarWidget {
+    fn clear_cache(&self) {
+        self.cache.clear();
     }
 }
 
@@ -1130,6 +1209,12 @@ impl ClockWidget {
     }
 }
 
+impl ClearCache for ClockWidget {
+    fn clear_cache(&self) {
+        self.style.clear_cache();
+    }
+}
+
 enum ClockStyle {
     DigitalHalf(DigitalClockHalf),
     AnalogueHalf(AnalogueClockHalf),
@@ -1144,6 +1229,17 @@ impl ClockStyle {
             ClockStyle::AnalogueHalf(clock) => clock.view(time),
             ClockStyle::MinimalHalf(clock) => clock.view(time),
             ClockStyle::AnalogueFull(clock) => clock.view(time),
+        }
+    }
+}
+
+impl ClearCache for ClockStyle {
+    fn clear_cache(&self) {
+        match self {
+            ClockStyle::AnalogueHalf(clock) => clock.clear_cache(),
+            ClockStyle::MinimalHalf(clock) => clock.clear_cache(),
+            ClockStyle::AnalogueFull(clock) => clock.clear_cache(),
+            _ => {}
         }
     }
 }
@@ -1171,13 +1267,13 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
         _state: &Self::State,
         renderer: &Renderer,
         theme: &Theme,
-        bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, now) = self;
 
         let clock = widget.cache.draw(renderer, bounds.size(), |frame| {
-            let palette = theme.extended_palette();
+            let palette = theme.palette();
 
             let center = frame.center();
             let width = frame.width() / 2.0;
@@ -1192,10 +1288,10 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                     y: center.y,
                 },
                 size: font_size.into(),
-                color: palette.secondary.base.text,
+                color: palette.text,
                 font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Right,
-                align_y: iced::alignment::Vertical::Center,
+                align_y: alignment::Vertical::Center,
                 ..Default::default()
             });
 
@@ -1208,7 +1304,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 color: color!(255, 0, 0),
                 font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Center,
-                align_y: iced::alignment::Vertical::Center,
+                align_y: alignment::Vertical::Center,
                 ..Default::default()
             });
 
@@ -1220,10 +1316,10 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                     y: center.y,
                 },
                 size: font_size.into(),
-                color: palette.secondary.base.text,
+                color: palette.text,
                 font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Left,
-                align_y: iced::alignment::Vertical::Center,
+                align_y: alignment::Vertical::Center,
                 ..Default::default()
             });
         });
@@ -1241,6 +1337,12 @@ struct AnalogueClockHalf {
 impl AnalogueClockHalf {
     fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
         stack![self.clock_frame.view(), self.hands.view(time)].into()
+    }
+}
+
+impl ClearCache for AnalogueClockHalf {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
     }
 }
 
@@ -1271,7 +1373,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
         bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let palette = theme.extended_palette();
+        let palette = theme.palette();
         let (widget, now) = self;
 
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
@@ -1301,7 +1403,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
             let wide_stroke = || -> Stroke {
                 Stroke {
                     width: width * 5.0,
-                    style: stroke::Style::Solid(palette.secondary.strong.text),
+                    style: stroke::Style::Solid(palette.text),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
                 }
@@ -1400,10 +1502,10 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
         _state: &Self::State,
         renderer: &Renderer,
         theme: &Theme,
-        bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let palette = theme.extended_palette();
+        let palette = theme.palette();
 
         let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
             let center = frame.center();
@@ -1421,9 +1523,9 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
                     content: format!("{hour}"),
                     size: (radius / 4.5).into(),
                     position: Point::new(x * 0.8, y * 0.8),
-                    color: palette.secondary.strong.text,
+                    color: palette.text,
                     align_x: text::Alignment::Center,
-                    align_y: iced::alignment::Vertical::Center,
+                    align_y: alignment::Vertical::Center,
                     font: SF_PRO_ROUNDED_BLACK,
                     ..canvas::Text::default()
                 });
@@ -1434,10 +1536,10 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
             for tick in 0..60 {
                 let angle = hand_rotation(tick, 60);
                 let width = if tick % 5 == 0 {
-                    color = palette.secondary.strong.text;
+                    color = palette.primary;
                     radius * 0.016
                 } else {
-                    color = palette.secondary.base.color;
+                    color = palette.danger;
                     radius * 0.0095
                 };
 
@@ -1471,6 +1573,12 @@ impl MinimalClockHalf {
     }
 }
 
+impl ClearCache for MinimalClockHalf {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
+    }
+}
+
 #[derive(Default)]
 struct ClockFrameMinimalHalf {
     cache: Cache,
@@ -1493,10 +1601,10 @@ impl<Message> canvas::Program<Message> for ClockFrameMinimalHalf {
         _state: &Self::State,
         renderer: &Renderer,
         theme: &Theme,
-        bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let palette = theme.extended_palette();
+        let palette = theme.palette();
 
         let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
             let center = frame.center();
@@ -1518,7 +1626,7 @@ impl<Message> canvas::Program<Message> for ClockFrameMinimalHalf {
                             Size::new(width, width * 5.0),
                             Radius::new(width / 2.0),
                         ),
-                        palette.secondary.strong.text,
+                        palette.text,
                     );
                 });
             }
@@ -1537,6 +1645,12 @@ struct AnalogueClockFull {
 impl AnalogueClockFull {
     fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
         stack![self.clock_frame.view(time), self.hands.view(time)].into()
+    }
+}
+
+impl ClearCache for AnalogueClockFull {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
     }
 }
 
@@ -1567,11 +1681,11 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
         _state: &Self::State,
         renderer: &Renderer,
         theme: &Theme,
-        bounds: iced::Rectangle,
-        _cursor: iced::mouse::Cursor,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, time) = self;
-        let palette = theme.extended_palette();
+        let palette = theme.palette();
 
         let static_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
@@ -1616,7 +1730,7 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
                     frame.stroke(
                         &line,
                         Stroke::default()
-                            .with_color(palette.secondary.base.color)
+                            .with_color(palette.danger)
                             .with_width(4.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
@@ -1642,7 +1756,7 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
                     frame.stroke(
                         &line,
                         Stroke::default()
-                            .with_color(color!(169, 169, 169))
+                            .with_color(palette.primary)
                             .with_width(10.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
@@ -1665,7 +1779,7 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
                     frame.stroke(
                         &line,
                         Stroke::default()
-                            .with_color(color!(89, 89, 89))
+                            .with_color(palette.danger)
                             .with_width(4.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
@@ -1692,7 +1806,7 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
                     frame.stroke(
                         &line,
                         Stroke::default()
-                            .with_color(color!(169, 169, 169))
+                            .with_color(palette.primary)
                             .with_width(10.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
@@ -1720,9 +1834,9 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
                         &line,
                         Stroke::default()
                             .with_color(if i == 5 {
-                                color!(169, 169, 169)
+                                palette.primary
                             } else {
-                                color!(89, 89, 89)
+                                palette.danger
                             })
                             .with_width(if i == 5 { 10.0 * scale } else { 4.0 * scale })
                             .with_line_cap(LineCap::Round),
@@ -1752,9 +1866,9 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
                         &line,
                         Stroke::default()
                             .with_color(if i == 5 {
-                                color!(169, 169, 169)
+                                palette.primary
                             } else {
-                                color!(89, 89, 89)
+                                palette.danger
                             })
                             .with_width(if i == 5 { 10.0 * scale } else { 4.0 * scale })
                             .with_line_cap(LineCap::Round),
@@ -1763,25 +1877,25 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
 
                 frame.fill_text(canvas::Text {
                     content: time.weekday().to_string().to_uppercase(),
-                    size: iced::Pixels(50.0 * scale),
+                    size: Pixels(50.0 * scale),
                     position: Point::new(frame.width() * 2.0 / 3.0, frame.center().y),
                     color: color!(255, 0, 0),
                     align_x: text::Alignment::Center,
-                    align_y: iced::alignment::Vertical::Center,
+                    align_y: alignment::Vertical::Center,
                     font: SF_PRO_EXPANDED_BOLD,
                     ..canvas::Text::default()
                 });
 
                 frame.fill_text(canvas::Text {
                     content: time.day().to_string(),
-                    size: iced::Pixels(50.0 * scale),
+                    size: Pixels(50.0 * scale),
                     position: Point::new(
                         frame.width() * 2.0 / 3.0 + 110.0 * scale,
                         frame.center().y,
                     ),
-                    color: Color::WHITE,
+                    color: palette.text,
                     align_x: text::Alignment::Center,
-                    align_y: iced::alignment::Vertical::Center,
+                    align_y: alignment::Vertical::Center,
                     font: SF_PRO_EXPANDED_BOLD,
                     ..canvas::Text::default()
                 });
@@ -1802,11 +1916,11 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
                 for (hour, point) in hours {
                     frame.fill_text(canvas::Text {
                         content: format!("{hour}"),
-                        size: iced::Pixels(125.0 * scale),
+                        size: Pixels(125.0 * scale),
                         position: point,
-                        color: palette.secondary.strong.text,
+                        color: palette.text,
                         align_x: text::Alignment::Center,
-                        align_y: iced::alignment::Vertical::Center,
+                        align_y: alignment::Vertical::Center,
                         font: SF_PRO_EXPANDED_BOLD,
                         ..canvas::Text::default()
                     });
@@ -1894,6 +2008,12 @@ impl WeatherWidget {
     }
 }
 
+impl ClearCache for WeatherWidget {
+    fn clear_cache(&self) {
+        self.style.clear_cache();
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 enum WeatherStatus {
     #[default]
@@ -1923,6 +2043,16 @@ impl WeatherStyle {
     }
 }
 
+impl ClearCache for WeatherStyle {
+    fn clear_cache(&self) {
+        match self {
+            Self::MinimalHalf(w) => w.cache.clear(),
+            Self::DetailedHalf(w) => w.cache.clear(),
+            Self::DailyHalf(w) => w.cache.clear(),
+        }
+    }
+}
+
 #[derive(Default)]
 struct MinimalForecastHalf {
     cache: Cache,
@@ -1942,19 +2072,19 @@ impl MinimalForecastHalf {
             WeatherStatus::Ok(w_data) => {
                 let code = w_data.current.as_ref().unwrap().weather_code;
                 if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
-                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(100)))
+                    svg(svg::Handle::from_memory(wmo_code_svg(100)))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 } else {
-                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
+                    svg(svg::Handle::from_memory(wmo_code_svg(code)))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 }
             }
             // WeatherStatus::Error(e) => button("Retry").on_press(Message::FetchWeather).into(),
-            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(255)))
+            _ => svg(svg::Handle::from_memory(wmo_code_svg(255)))
                 .width(Length::Fixed(icon_size))
                 .height(Length::Fixed(icon_size))
                 .into(),
@@ -1965,13 +2095,14 @@ impl MinimalForecastHalf {
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(icon)
-                .padding(iced::padding::top(icon_y).left(icon_x))
+                .padding(padding::top(icon_y).left(icon_x))
                 .width(Length::Fill)
                 .height(Length::Fill)
         ]
         .into()
     }
 }
+
 impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatus) {
     type State = ();
 
@@ -1983,7 +2114,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let palette = theme.extended_palette();
+        let palette = theme.palette();
         let (widget, weather) = self;
 
         let static_layer = match weather {
@@ -2005,8 +2136,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                             w * 0.05,
                             frame.center().y - 380.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2015,8 +2146,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                         content: format!("{:.0}°", current.temperature_2m),
                         size: Pixels(w.min(h) * 0.33),
                         position: Point::new(w * 0.05, frame.center().y),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BLACK,
                         ..canvas::Text::default()
                     });
@@ -2028,8 +2159,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                             w * 0.05,
                             frame.center().y + 300.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2044,8 +2175,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                             w * 0.05,
                             frame.center().y + 390.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2056,8 +2187,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     content: String::from("Weather\nis loading"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
-                    color: palette.secondary.base.color,
-                    align_y: iced::alignment::Vertical::Center,
+                    color: palette.text,
+                    align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
@@ -2068,8 +2199,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     content: String::from("Weather\nUnavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
-                    color: palette.secondary.base.color,
-                    align_y: iced::alignment::Vertical::Center,
+                    color: palette.text,
+                    align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
@@ -2099,18 +2230,19 @@ impl DetailedForecastHalf {
             WeatherStatus::Ok(w_data) => {
                 let code = w_data.current.as_ref().unwrap().weather_code;
                 if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
-                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(100)))
+                    svg(svg::Handle::from_memory(wmo_code_svg(100)))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 } else {
-                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
+                    svg(svg::Handle::from_memory(wmo_code_svg(code)))
+                        // .style(|_theme| svg::Style { color: Some() })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 }
             }
-            _ => iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(255)))
+            _ => svg(svg::Handle::from_memory(wmo_code_svg(255)))
                 .width(Length::Fixed(icon_size))
                 .height(Length::Fixed(icon_size)),
         };
@@ -2120,7 +2252,7 @@ impl DetailedForecastHalf {
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(icon)
-                .padding(iced::padding::top(icon_y).left(icon_x))
+                .padding(padding::top(icon_y).left(icon_x))
                 .width(Length::Fill)
                 .height(Length::Fill)
         ]
@@ -2140,7 +2272,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, weather) = self;
-        let palette = theme.extended_palette();
+        let palette = theme.palette();
 
         let static_layer = match weather {
             WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
@@ -2161,8 +2293,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.05,
                             frame.center().y - 380.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2174,8 +2306,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.05,
                             frame.center().y - 180.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BLACK,
                         ..canvas::Text::default()
                     });
@@ -2187,8 +2319,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.95,
                             frame.center().y - 300.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2201,8 +2333,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.95,
                             frame.center().y - 200.0 * scale.min(h / 1080.0),
                         ),
-                        color: palette.secondary.base.color,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.danger,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2215,8 +2347,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.05,
                             frame.center().y - 100.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2235,8 +2367,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.95,
                             frame.center().y - 100.0 * scale.min(h / 1080.0),
                         ),
-                        color: palette.secondary.base.color,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.danger,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2249,8 +2381,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.05,
                             frame.center().y + 50.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2262,8 +2394,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.95,
                             frame.center().y + 50.0 * scale.min(h / 1080.0),
                         ),
-                        color: palette.secondary.base.color,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.danger,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2276,8 +2408,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.05,
                             frame.center().y + 200.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2289,8 +2421,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.95,
                             frame.center().y + 200.0 * scale.min(h / 1080.0),
                         ),
-                        color: palette.secondary.base.color,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.danger,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2303,8 +2435,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.05,
                             frame.center().y + 350.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2316,8 +2448,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             w * 0.95,
                             frame.center().y + 350.0 * scale.min(h / 1080.0),
                         ),
-                        color: palette.secondary.base.color,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.danger,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2329,8 +2461,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     content: String::from("Weather\nis loading"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
-                    color: palette.secondary.base.color,
-                    align_y: iced::alignment::Vertical::Center,
+                    color: palette.text,
+                    align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
@@ -2341,8 +2473,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     content: String::from("Weather\nUnavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
-                    color: palette.secondary.base.color,
-                    align_y: iced::alignment::Vertical::Center,
+                    color: palette.text,
+                    align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
@@ -2384,11 +2516,10 @@ impl DailyForecastHalf {
                     current.weather_code
                 };
 
-                let current_icon =
-                    iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(code)))
-                        .width(Length::Fixed(icon_size))
-                        .height(Length::Fixed(icon_size))
-                        .into();
+                let current_icon = svg(svg::Handle::from_memory(wmo_code_svg(code)))
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
+                    .into();
 
                 let daily = w_data.daily.as_ref();
 
@@ -2396,12 +2527,10 @@ impl DailyForecastHalf {
                     Some(d) => (1..=4)
                         .filter_map(|i| d.weather_code.get(i).copied())
                         .map(|code| {
-                            iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(
-                                code,
-                            )))
-                            .width(Length::Fixed(icon_size * 1.3))
-                            .height(Length::Fixed(icon_size * 1.3))
-                            .into()
+                            svg(svg::Handle::from_memory(wmo_code_svg(code)))
+                                .width(Length::Fixed(icon_size * 1.3))
+                                .height(Length::Fixed(icon_size * 1.3))
+                                .into()
                         })
                         .collect(),
                     None => vec![],
@@ -2410,7 +2539,7 @@ impl DailyForecastHalf {
                 (current_icon, icons)
             }
             _ => (
-                iced::widget::svg(iced::widget::svg::Handle::from_memory(wmo_code_svg(255)))
+                svg(svg::Handle::from_memory(wmo_code_svg(255)))
                     .width(Length::Fixed(icon_size))
                     .height(Length::Fixed(icon_size))
                     .into(),
@@ -2425,11 +2554,11 @@ impl DailyForecastHalf {
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(icon)
-                .padding(iced::padding::top(icon_y).left(icon_x))
+                .padding(padding::top(icon_y).left(icon_x))
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(daily_column)
-                .padding(iced::padding::top(h / 2.0 - 180.0 * scale - 20.0 * scale).left(w * 0.3))
+                .padding(padding::top(h / 2.0 - 180.0 * scale - 20.0 * scale).left(w * 0.3))
                 .width(Length::Fill)
                 .height(Length::Fill)
         ]
@@ -2455,7 +2584,7 @@ impl<'a> canvas::Program<Message>
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, time, weather) = self;
-        let palette = theme.extended_palette();
+        let palette = theme.palette();
 
         let weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         let today = weekday_to_number(&time.weekday());
@@ -2482,8 +2611,8 @@ impl<'a> canvas::Program<Message>
                             w * 0.05,
                             frame.center().y - 380.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
@@ -2495,8 +2624,8 @@ impl<'a> canvas::Program<Message>
                             w * 0.05,
                             frame.center().y - 180.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BLACK,
                         ..canvas::Text::default()
                     });
@@ -2508,8 +2637,8 @@ impl<'a> canvas::Program<Message>
                             w * 0.95,
                             frame.center().y - 300.0 * scale.min(h / 1080.0),
                         ),
-                        color: Color::WHITE,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.text,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2522,8 +2651,8 @@ impl<'a> canvas::Program<Message>
                             w * 0.95,
                             frame.center().y - 200.0 * scale.min(h / 1080.0),
                         ),
-                        color: palette.secondary.base.color,
-                        align_y: iced::alignment::Vertical::Bottom,
+                        color: palette.danger,
+                        align_y: alignment::Vertical::Bottom,
                         align_x: text::Alignment::Right,
                         font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
@@ -2537,8 +2666,8 @@ impl<'a> canvas::Program<Message>
                                 w * 0.05,
                                 frame.center().y + curr_padding * scale.min(h / 1080.0),
                             ),
-                            color: Color::WHITE,
-                            align_y: iced::alignment::Vertical::Bottom,
+                            color: palette.text,
+                            align_y: alignment::Vertical::Bottom,
                             font: SF_PRO_DISPLAY_BOLD,
                             ..canvas::Text::default()
                         });
@@ -2550,8 +2679,8 @@ impl<'a> canvas::Program<Message>
                                 w * 0.80,
                                 frame.center().y + curr_padding * scale.min(h / 1080.0),
                             ),
-                            color: palette.secondary.base.color,
-                            align_y: iced::alignment::Vertical::Bottom,
+                            color: palette.danger,
+                            align_y: alignment::Vertical::Bottom,
                             align_x: text::Alignment::Right,
                             font: SF_PRO_DISPLAY_BOLD,
                             ..canvas::Text::default()
@@ -2564,8 +2693,8 @@ impl<'a> canvas::Program<Message>
                                 w * 0.95,
                                 frame.center().y + curr_padding * scale.min(h / 1080.0),
                             ),
-                            color: Color::WHITE,
-                            align_y: iced::alignment::Vertical::Bottom,
+                            color: palette.text,
+                            align_y: alignment::Vertical::Bottom,
                             align_x: text::Alignment::Right,
                             font: SF_PRO_DISPLAY_BOLD,
                             ..canvas::Text::default()
@@ -2587,8 +2716,8 @@ impl<'a> canvas::Program<Message>
                                     w * 0.05,
                                     frame.center().y + curr_padding * scale.min(h / 1080.0),
                                 ),
-                                color: Color::WHITE,
-                                align_y: iced::alignment::Vertical::Bottom,
+                                color: palette.text,
+                                align_y: alignment::Vertical::Bottom,
                                 font: SF_PRO_DISPLAY_BOLD,
                                 ..canvas::Text::default()
                             });
@@ -2600,8 +2729,8 @@ impl<'a> canvas::Program<Message>
                                     w * 0.80,
                                     frame.center().y + curr_padding * scale.min(h / 1080.0),
                                 ),
-                                color: palette.secondary.base.color,
-                                align_y: iced::alignment::Vertical::Bottom,
+                                color: palette.danger,
+                                align_y: alignment::Vertical::Bottom,
                                 align_x: text::Alignment::Right,
                                 font: SF_PRO_DISPLAY_BOLD,
                                 ..canvas::Text::default()
@@ -2614,8 +2743,8 @@ impl<'a> canvas::Program<Message>
                                     w * 0.95,
                                     frame.center().y + curr_padding * scale.min(h / 1080.0),
                                 ),
-                                color: Color::WHITE,
-                                align_y: iced::alignment::Vertical::Bottom,
+                                color: palette.text,
+                                align_y: alignment::Vertical::Bottom,
                                 align_x: text::Alignment::Right,
                                 font: SF_PRO_DISPLAY_BOLD,
                                 ..canvas::Text::default()
@@ -2632,8 +2761,8 @@ impl<'a> canvas::Program<Message>
                     content: String::from("Weather\nis loading"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
-                    color: palette.secondary.base.color,
-                    align_y: iced::alignment::Vertical::Center,
+                    color: palette.text,
+                    align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
@@ -2644,8 +2773,8 @@ impl<'a> canvas::Program<Message>
                     content: String::from("Weather\nUnavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
-                    color: palette.secondary.base.color,
-                    align_y: iced::alignment::Vertical::Center,
+                    color: palette.text,
+                    align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
@@ -2674,8 +2803,8 @@ fn hand_rotation(n: u32, total: u32) -> Degrees {
     Degrees(360.0 * turns)
 }
 
-fn hand_rotation_sec(value: f32, max: f32) -> iced::Radians {
-    iced::Radians(value / max * std::f32::consts::TAU)
+fn hand_rotation_sec(value: f32, max: f32) -> Radians {
+    Radians(value / max * std::f32::consts::TAU)
 }
 
 fn wmo_code_description(code: u8) -> &'static str {
