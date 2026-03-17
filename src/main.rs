@@ -417,7 +417,7 @@ impl Application {
             .page0_left
             .iter()
             .map(|w| {
-                container(w.view(&self.time, &self.weather, size))
+                container(w.view(&self.time, &self.weather, &self.theme.value(), size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .into()
@@ -428,7 +428,7 @@ impl Application {
             .page0_right
             .iter()
             .map(|w| {
-                container(w.view(&self.time, &self.weather, size))
+                container(w.view(&self.time, &self.weather, &self.theme.value(), size))
                     .width(Length::Fixed(sw))
                     .height(Length::Fixed(sh))
                     .into()
@@ -464,7 +464,7 @@ impl Application {
             .page1_widgets
             .iter()
             .map(|w| {
-                container(w.view(&self.time, &self.weather, size))
+                container(w.view(&self.time, &self.weather, &self.theme.value(), size))
                     .width(Length::Fixed(size.width))
                     .height(Length::Fixed(size.height))
                     .into()
@@ -1015,12 +1015,13 @@ impl AppWidget {
         &'a self,
         time: &'a DateTime<Local>,
         weather: &'a WeatherStatus,
+        theme: &'a Theme,
         size: Size,
     ) -> Element<'a, Message> {
         match self {
             AppWidget::Clock(w) => w.view(time),
             AppWidget::Calendar(w) => w.view(time),
-            AppWidget::Weather(w) => w.view(time, weather, size),
+            AppWidget::Weather(w) => w.view(theme, time, weather, size),
         }
     }
 
@@ -2000,11 +2001,12 @@ impl WeatherWidget {
 
     fn view<'a>(
         &'a self,
+        theme: &'a Theme,
         time: &'a DateTime<Local>,
         weather: &'a WeatherStatus,
         size: Size,
     ) -> Element<'a, Message> {
-        self.style.view(time, weather, size)
+        self.style.view(time, theme, weather, size)
     }
 }
 
@@ -2032,13 +2034,14 @@ impl WeatherStyle {
     fn view<'a>(
         &'a self,
         time: &'a DateTime<Local>,
+        theme: &'a Theme,
         weather: &'a WeatherStatus,
         size: Size,
     ) -> Element<'a, Message> {
         match self {
-            Self::MinimalHalf(w) => w.view(weather, size),
-            Self::DetailedHalf(w) => w.view(weather, size),
-            Self::DailyHalf(w) => w.view(time, weather, size),
+            Self::MinimalHalf(w) => w.view(theme, weather, size),
+            Self::DetailedHalf(w) => w.view(theme, weather, size),
+            Self::DailyHalf(w) => w.view(theme, time, weather, size),
         }
     }
 }
@@ -2059,7 +2062,12 @@ struct MinimalForecastHalf {
 }
 
 impl MinimalForecastHalf {
-    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        theme: &'a Theme,
+        weather: &'a WeatherStatus,
+        size: Size,
+    ) -> Element<'a, Message> {
         let w = size.width / 2.0;
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
@@ -2073,11 +2081,17 @@ impl MinimalForecastHalf {
                 let code = w_data.current.as_ref().unwrap().weather_code;
                 if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
                     svg(svg::Handle::from_memory(wmo_code_svg(100)))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(theme.palette().primary),
+                        })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 } else {
                     svg(svg::Handle::from_memory(wmo_code_svg(code)))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(theme.palette().primary),
+                        })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
@@ -2085,6 +2099,9 @@ impl MinimalForecastHalf {
             }
             // WeatherStatus::Error(e) => button("Retry").on_press(Message::FetchWeather).into(),
             _ => svg(svg::Handle::from_memory(wmo_code_svg(255)))
+                .style(move |_theme: &Theme, _status| svg::Style {
+                    color: Some(theme.palette().primary),
+                })
                 .width(Length::Fixed(icon_size))
                 .height(Length::Fixed(icon_size))
                 .into(),
@@ -2217,7 +2234,12 @@ struct DetailedForecastHalf {
 }
 
 impl DetailedForecastHalf {
-    fn view<'a>(&'a self, weather: &'a WeatherStatus, size: Size) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        theme: &'a Theme,
+        weather: &'a WeatherStatus,
+        size: Size,
+    ) -> Element<'a, Message> {
         let w = size.width / 2.0;
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
@@ -2231,18 +2253,26 @@ impl DetailedForecastHalf {
                 let code = w_data.current.as_ref().unwrap().weather_code;
                 if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
                     svg(svg::Handle::from_memory(wmo_code_svg(100)))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(theme.palette().primary),
+                        })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 } else {
                     svg(svg::Handle::from_memory(wmo_code_svg(code)))
-                        // .style(|_theme| svg::Style { color: Some() })
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(theme.palette().primary),
+                        })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 }
             }
             _ => svg(svg::Handle::from_memory(wmo_code_svg(255)))
+                .style(move |_theme: &Theme, _status| svg::Style {
+                    color: Some(theme.palette().primary),
+                })
                 .width(Length::Fixed(icon_size))
                 .height(Length::Fixed(icon_size)),
         };
@@ -2493,6 +2523,7 @@ struct DailyForecastHalf {
 impl DailyForecastHalf {
     fn view<'a>(
         &'a self,
+        theme: &'a Theme,
         time: &'a DateTime<Local>,
         weather: &'a WeatherStatus,
         size: Size,
@@ -2517,6 +2548,9 @@ impl DailyForecastHalf {
                 };
 
                 let current_icon = svg(svg::Handle::from_memory(wmo_code_svg(code)))
+                    .style(move |_theme: &Theme, _status| svg::Style {
+                        color: Some(theme.palette().primary),
+                    })
                     .width(Length::Fixed(icon_size))
                     .height(Length::Fixed(icon_size))
                     .into();
@@ -2528,6 +2562,9 @@ impl DailyForecastHalf {
                         .filter_map(|i| d.weather_code.get(i).copied())
                         .map(|code| {
                             svg(svg::Handle::from_memory(wmo_code_svg(code)))
+                                .style(move |_theme: &Theme, _status| svg::Style {
+                                    color: Some(theme.palette().primary),
+                                })
                                 .width(Length::Fixed(icon_size * 1.3))
                                 .height(Length::Fixed(icon_size * 1.3))
                                 .into()
