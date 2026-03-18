@@ -12,7 +12,7 @@ use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
 use iced::widget::{button, canvas, center, column, container, responsive, row, stack, svg, text};
 use iced::window::{self, Id};
 use iced::{
-    Alignment, Color, Degrees, Element, Font, Length, Point, Radians, Rectangle, Renderer,
+    Alignment, Color, Degrees, Element, Font, Length, Padding, Point, Radians, Rectangle, Renderer,
     Settings, Size, Subscription, Task, Theme, Vector, alignment, color, padding,
 };
 use iced::{Pixels, mouse};
@@ -203,6 +203,14 @@ impl Application {
             ),
             Message::WeatherFetched(status) => {
                 self.weather = status;
+
+                for w in &self.page0_right {
+                    w.clear_cache();
+                }
+
+                for w in &self.page1_widgets {
+                    w.clear_cache();
+                }
 
                 Task::none()
             }
@@ -504,8 +512,8 @@ impl Default for Application {
                 ))),
             ],
             page1_widgets: vec![
-                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueFull(
-                    AnalogueClockFull::default(),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::WorldFull(
+                    WorldClockFull::default(),
                 ))),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueFull(
                     AnalogueClockFull::default(),
@@ -1022,7 +1030,7 @@ impl AppWidget {
         size: Size,
     ) -> Element<'a, Message> {
         match self {
-            AppWidget::Clock(w) => w.view(time),
+            AppWidget::Clock(w) => w.view(time, weather, theme, size),
             AppWidget::Calendar(w) => w.view(time),
             AppWidget::Weather(w) => w.view(theme, time, weather, size),
         }
@@ -1208,8 +1216,14 @@ impl ClockWidget {
         Self { style }
     }
 
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        self.style.view(time)
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        theme: &'a Theme,
+        size: Size,
+    ) -> Element<'a, Message> {
+        self.style.view(time, weather, theme, size)
     }
 }
 
@@ -1224,15 +1238,23 @@ enum ClockStyle {
     AnalogueHalf(AnalogueClockHalf),
     MinimalHalf(MinimalClockHalf),
     AnalogueFull(AnalogueClockFull),
+    WorldFull(WorldClockFull),
 }
 
 impl ClockStyle {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        theme: &'a Theme,
+        size: Size,
+    ) -> Element<'a, Message> {
         match self {
             ClockStyle::DigitalHalf(clock) => clock.view(time),
             ClockStyle::AnalogueHalf(clock) => clock.view(time),
             ClockStyle::MinimalHalf(clock) => clock.view(time),
             ClockStyle::AnalogueFull(clock) => clock.view(time),
+            ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size),
         }
     }
 }
@@ -1243,6 +1265,7 @@ impl ClearCache for ClockStyle {
             ClockStyle::AnalogueHalf(clock) => clock.clear_cache(),
             ClockStyle::MinimalHalf(clock) => clock.clear_cache(),
             ClockStyle::AnalogueFull(clock) => clock.clear_cache(),
+            ClockStyle::WorldFull(clock) => clock.clear_cache(),
             _ => {}
         }
     }
@@ -1936,6 +1959,132 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueFull, &'a DateTime<
     }
 }
 
+#[derive(Default)]
+struct WorldClockFull {
+    minute: Cell<u32>,
+    cache: Cache,
+}
+
+impl WorldClockFull {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        theme: &'a Theme,
+        size: Size,
+    ) -> Element<'a, Message> {
+        if time.minute() != self.minute.get() {
+            self.minute.set(time.minute());
+            self.cache.clear();
+        }
+
+        let map = svg(svg::Handle::from_memory(include_bytes!(
+            "../icons/world_map.svg"
+        )))
+        .style(move |_theme: &Theme, _status| svg::Style {
+            color: Some(theme.palette().primary),
+        })
+        .height(Length::Fill)
+        .width(size.width * 0.85);
+
+        stack![
+            canvas((self, time, weather))
+                .width(Length::Fill)
+                .height(Length::Fill),
+            container(map)
+                .padding(Padding {
+                    top: 0.0,
+                    bottom: 0.0,
+                    // bottom: size.height * 0.1,
+                    right: size.width * 0.015,
+                    left: 0.0
+                })
+                .align_right(size.width)
+                .width(Length::Fill)
+                .height(Length::Fill)
+        ]
+        .into()
+    }
+}
+
+impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, &'a WeatherStatus) {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let (widget, time, weather) = self;
+        let palette = theme.palette();
+
+        let static_layer = match weather {
+            WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
+                let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
+
+                frame.with_save(|frame| {
+                    let city = w.city.as_ref().unwrap();
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}", city),
+                        size: Pixels(50.0 * scale),
+                        position: Point::new(
+                            frame.center().x - (bounds.width * 0.45),
+                            frame.center().y + (bounds.height * 0.2),
+                        ),
+                        color: palette.warning,
+                        align_y: alignment::Vertical::Center,
+                        align_x: text::Alignment::Left,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+
+                    frame.fill_text(canvas::Text {
+                        content: format!("{}:{}", time.hour(), time.minute()),
+                        size: Pixels(200.0 * scale),
+                        position: Point::new(
+                            frame.center().x - (bounds.width * 0.45),
+                            frame.center().y + (bounds.height * 0.3),
+                        ),
+                        color: palette.text,
+                        align_y: alignment::Vertical::Center,
+                        align_x: text::Alignment::Left,
+                        font: SF_PRO_DISPLAY_BLACK,
+                        ..canvas::Text::default()
+                    });
+                });
+            }),
+            _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
+                let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
+                frame.fill_text(canvas::Text {
+                    content: String::from("Location unavailable"),
+                    size: Pixels(50.0 * scale),
+                    position: Point::new(
+                        frame.center().x - (bounds.width * 0.45),
+                        frame.center().y + (bounds.height * 0.2),
+                    ),
+                    color: palette.warning,
+                    align_y: alignment::Vertical::Center,
+                    align_x: text::Alignment::Left,
+                    font: SF_PRO_DISPLAY_BLACK,
+                    ..canvas::Text::default()
+                });
+            })
+        };
+
+        vec![static_layer]
+    }
+}
+
+impl ClearCache for WorldClockFull {
+    fn clear_cache(&self) {
+        self.cache.clear();
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Default)]
 struct Weather {
     city: Option<String>,
@@ -2202,20 +2351,20 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     });
                 })
             }),
-            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
-                frame.fill_text(canvas::Text {
-                    content: String::from("Weather\nis loading"),
-                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
-                    position: frame.center(),
-                    color: palette.text,
-                    align_y: alignment::Vertical::Center,
-                    align_x: text::Alignment::Center,
-                    font: SF_PRO_DISPLAY_BOLD,
-                    ..canvas::Text::default()
-                });
-                widget.cache.clear();
-            }),
-            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
+            // WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
+            //     frame.fill_text(canvas::Text {
+            //         content: String::from("Weather\nis loading"),
+            //         size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+            //         position: frame.center(),
+            //         color: palette.text,
+            //         align_y: alignment::Vertical::Center,
+            //         align_x: text::Alignment::Center,
+            //         font: SF_PRO_DISPLAY_BOLD,
+            //         ..canvas::Text::default()
+            //     });
+            //     widget.cache.clear();
+            // }),
+            _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
                     content: String::from("Weather\nUnavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
@@ -2490,20 +2639,20 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
                 });
             }),
-            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
-                frame.fill_text(canvas::Text {
-                    content: String::from("Weather\nis loading"),
-                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
-                    position: frame.center(),
-                    color: palette.text,
-                    align_y: alignment::Vertical::Center,
-                    align_x: text::Alignment::Center,
-                    font: SF_PRO_DISPLAY_BOLD,
-                    ..canvas::Text::default()
-                });
-                widget.cache.clear();
-            }),
-            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
+            // WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
+            //     frame.fill_text(canvas::Text {
+            //         content: String::from("Weather\nis loading"),
+            //         size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+            //         position: frame.center(),
+            //         color: palette.text,
+            //         align_y: alignment::Vertical::Center,
+            //         align_x: text::Alignment::Center,
+            //         font: SF_PRO_DISPLAY_BOLD,
+            //         ..canvas::Text::default()
+            //     });
+            //     widget.cache.clear();
+            // }),
+            _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
                     content: String::from("Weather\nUnavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
@@ -2804,20 +2953,20 @@ impl<'a> canvas::Program<Message>
                     }
                 });
             }),
-            WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
-                frame.fill_text(canvas::Text {
-                    content: String::from("Weather\nis loading"),
-                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
-                    position: frame.center(),
-                    color: palette.text,
-                    align_y: alignment::Vertical::Center,
-                    align_x: text::Alignment::Center,
-                    font: SF_PRO_DISPLAY_BOLD,
-                    ..canvas::Text::default()
-                });
-                widget.cache.clear();
-            }),
-            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
+            // WeatherStatus::Loading => widget.cache.draw(renderer, bounds.size(), |frame| {
+            //     frame.fill_text(canvas::Text {
+            //         content: String::from("Weather\nis loading"),
+            //         size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
+            //         position: frame.center(),
+            //         color: palette.text,
+            //         align_y: alignment::Vertical::Center,
+            //         align_x: text::Alignment::Center,
+            //         font: SF_PRO_DISPLAY_BOLD,
+            //         ..canvas::Text::default()
+            //     });
+            //     widget.cache.clear();
+            // }),
+            _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
                     content: String::from("Weather\nUnavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
