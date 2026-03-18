@@ -238,7 +238,7 @@ impl Application {
                             background: Color::from_rgb(0.0, 0.0, 0.0),
                             primary: color!(246, 0, 1),
                             success: color!(0, 0, 0),
-                            warning: Color::from_rgb(1.0, 0.0, 0.0),
+                            warning: color!(159, 5, 0),
                             danger: color!(87, 4, 4),
                         },
                     )));
@@ -251,6 +251,7 @@ impl Application {
                             danger: color!(87, 87, 87),
                             background: color!(0, 0, 0),
                             success: Color::WHITE,
+                            warning: color!(240, 157, 10),
                             ..Theme::Moonfly.palette()
                         },
                     )));
@@ -438,7 +439,8 @@ impl Application {
         let left = vertical_carousel(left_items, sw, sh);
         let right = vertical_carousel(right_items, sw, sh);
 
-        let dark_btn: Element<Message> = button("dark mode").on_press(Message::ToggleTheme).into();
+        let dark_btn: Element<Message> =
+            button("toggle theme").on_press(Message::ToggleTheme).into();
 
         container(row![
             left,
@@ -518,6 +520,7 @@ impl Default for Application {
                         danger: color!(87, 87, 87),
                         background: color!(0, 0, 0),
                         success: Color::WHITE,
+                        warning: color!(240, 157, 10),
                         ..Theme::Moonfly.palette()
                     },
                 ),
@@ -1040,16 +1043,16 @@ trait ClearCache {
 
 #[derive(Default)]
 struct CalendarWidget {
-    // last_day: Cell<u32>,
+    last_day: Cell<u32>,
     cache: Cache,
 }
 
 impl CalendarWidget {
     fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        // if time.day() != self.last_day.get() {
-        //     self.last_day.set(time.day());
-        //     self.cache.clear();
-        // }
+        if time.day() != self.last_day.get() {
+            self.last_day.set(time.day());
+            self.cache.clear();
+        }
 
         canvas((self, time))
             .width(Length::Fill)
@@ -1302,7 +1305,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 content: colon.to_string(),
                 position: center,
                 size: font_size.into(),
-                color: color!(255, 0, 0),
+                color: palette.danger,
                 font: SF_PRO_ROUNDED_BLACK,
                 align_x: text::Alignment::Center,
                 align_y: alignment::Vertical::Center,
@@ -1395,7 +1398,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
             let thin_stroke = || -> Stroke {
                 Stroke {
                     width: width,
-                    style: stroke::Style::Solid(color!(240, 157, 10)),
+                    style: stroke::Style::Solid(palette.warning),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
                 }
@@ -2210,6 +2213,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
                 });
+                widget.cache.clear();
             }),
             WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
@@ -2497,6 +2501,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
                 });
+                widget.cache.clear();
             }),
             WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
@@ -2517,6 +2522,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
 
 #[derive(Default)]
 struct DailyForecastHalf {
+    last_day: Cell<u32>,
     cache: Cache,
 }
 
@@ -2528,6 +2534,11 @@ impl DailyForecastHalf {
         weather: &'a WeatherStatus,
         size: Size,
     ) -> Element<'a, Message> {
+        if time.day() != self.last_day.get() {
+            self.last_day.set(time.day());
+            self.cache.clear();
+        }
+
         let w = size.width / 2.0;
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
@@ -2695,7 +2706,7 @@ impl<'a> canvas::Program<Message>
                         ..canvas::Text::default()
                     });
 
-                    for weekday in today + 1..7 {
+                    for weekday in today..7 {
                         frame.fill_text(canvas::Text {
                             content: format!("{}", weekdays[weekday]),
                             size: Pixels(w.min(h) * 0.08),
@@ -2804,6 +2815,7 @@ impl<'a> canvas::Program<Message>
                     font: SF_PRO_DISPLAY_BOLD,
                     ..canvas::Text::default()
                 });
+                widget.cache.clear();
             }),
             WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
