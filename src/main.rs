@@ -2230,15 +2230,12 @@ impl WorldClockFull {
             "../icons/world_map.svg"
         )))
         .style(move |_theme: &Theme, _status| svg::Style {
-            color: Some(theme.palette().text),
+            color: Some(theme.palette().primary),
         })
         .height(Length::Fill)
         .width(size.width * 0.85);
 
         stack![
-            canvas((self, time, weather))
-                .width(Length::Fill)
-                .height(Length::Fill),
             container(map)
                 .padding(Padding {
                     top: 0.0,
@@ -2249,7 +2246,10 @@ impl WorldClockFull {
                 })
                 .align_right(size.width)
                 .width(Length::Fill)
-                .height(Length::Fill)
+                .height(Length::Fill),
+            canvas((self, time, weather))
+                .width(Length::Fill)
+                .height(Length::Fill),
         ]
         .into()
     }
@@ -2275,13 +2275,33 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
 
                 frame.with_save(|frame| {
                     let city = w.city.as_ref().unwrap();
+                    let (lat, lon) = w.coordinate.as_ref().unwrap();
+
+                    let map_width = frame.width() * 0.85;
+                    let map_height = map_width * (921.0 / 2146.0);
+
+                    let map_offset_y = (frame.height() - map_height) / 2.0;
+
+                    let point = lat_lon_to_xy(
+                        lat.parse::<f64>().unwrap(),
+                        lon.parse::<f64>().unwrap(),
+                        map_width,
+                        map_height,
+                    ) + Vector::new(frame.width() * 0.15, map_offset_y);
+
+                    let dot_size = map_width * 0.015;
+                    let dot_outer = Path::circle(point, dot_size);
+                    let dot_inner = Path::circle(point, dot_size * 0.7);
+
+                    frame.fill(&dot_outer, palette.text);
+                    frame.fill(&dot_inner, palette.warning);
 
                     frame.fill_text(canvas::Text {
                         content: format!("{}", city),
                         size: Pixels(50.0 * scale),
                         position: Point::new(
                             frame.center().x - (bounds.width * 0.45),
-                            frame.center().y + (bounds.height * 0.15),
+                            frame.center().y + (bounds.height * 0.12),
                         ),
                         color: palette.warning,
                         align_y: alignment::Vertical::Center,
@@ -2291,7 +2311,7 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{}:{:2}", time.hour(), time.minute()),
+                        content: format!("{}:{:02}", time.hour(), time.minute()),
                         size: Pixels(200.0 * scale),
                         position: Point::new(
                             frame.center().x - (bounds.width * 0.45),
@@ -2305,7 +2325,7 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
                     });
                 });
             }),
-            _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
+            WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
                 frame.fill_text(canvas::Text {
                     content: String::from("Location unavailable"),
@@ -2320,7 +2340,23 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
                     font: SF_PRO_DISPLAY_BLACK,
                     ..canvas::Text::default()
                 });
-            })
+            }),
+            _ => widget.cache.draw(renderer, bounds.size(), |frame| {
+                let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
+                frame.fill_text(canvas::Text {
+                    content: String::from("Unknown"),
+                    size: Pixels(50.0 * scale),
+                    position: Point::new(
+                        frame.center().x - (bounds.width * 0.45),
+                        frame.center().y + (bounds.height * 0.2),
+                    ),
+                    color: palette.warning,
+                    align_y: alignment::Vertical::Center,
+                    align_x: text::Alignment::Left,
+                    font: SF_PRO_DISPLAY_BLACK,
+                    ..canvas::Text::default()
+                });
+            }),
         };
 
         vec![static_layer]
@@ -2336,6 +2372,7 @@ impl ClearCache for WorldClockFull {
 #[derive(Clone, Debug, Deserialize, Default)]
 struct Weather {
     city: Option<String>,
+    coordinate: Option<(String, String)>,
     current: Option<CurrentForecast>,
     daily: Option<DailyForecast>,
 }
@@ -2355,6 +2392,7 @@ impl Weather {
 
         *self = Weather {
             city: Some(info.city.replace("\"", "")),
+            coordinate: Some((info.latitude, info.longitude)),
             ..response
         };
 
@@ -3303,4 +3341,14 @@ fn arrow_svg(direction: &str) -> &'static [u8] {
         "repeat" => include_bytes!("../icons/arrow-repeat.svg"),
         &_ => include_bytes!("../icons/arrow-down-short.svg"),
     }
+}
+
+fn lat_lon_to_xy(lat: f64, lon: f64, width: f32, height: f32) -> Point {
+    let x = (lon + 180.0) / 360.0 * width as f64;
+
+    let lat_rad = lat.to_radians();
+    let merc = (lat_rad.tan() + 1.0 / lat_rad.cos()).ln();
+    let y = (1.0 - merc / std::f64::consts::PI) / 2.0 * height as f64;
+
+    Point::new(x as f32, y as f32)
 }
