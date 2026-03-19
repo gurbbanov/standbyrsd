@@ -1404,105 +1404,230 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
         let (widget, now) = self;
 
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
-            let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
-
             let center = frame.center();
-
             let radius = frame.width().min(frame.height()) / 2.3;
-
-            let hour_hand = Path::line(Point::ORIGIN, Point::new(0.0, -0.5 * radius));
-
-            let minute_hand = Path::line(Point::ORIGIN, Point::new(0.0, -0.9 * radius));
-
-            let second_hand = Path::line(Point::ORIGIN, Point::new(0.0, radius));
-
-            let width = radius / 100.0;
-
-            let thin_stroke = || -> Stroke {
-                Stroke {
-                    width: width,
-                    style: stroke::Style::Solid(palette.warning),
-                    line_cap: LineCap::Round,
-                    ..Stroke::default()
-                }
-            };
-
-            let wide_stroke = || -> Stroke {
-                Stroke {
-                    width: width * 5.0,
-                    style: stroke::Style::Solid(palette.text),
-                    line_cap: LineCap::Round,
-                    ..Stroke::default()
-                }
-            };
+            let seconds = now.second() as f32 + now.nanosecond() as f32 / 1_000_000_000.0;
+            let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
+            let hour_hand_angle = Radians::from(hand_rotation(now.hour(), 12)) + minutes_portion;
+            let minute_angle = hand_rotation(now.minute() * 15 + now.second() / 4, 900);
+            let second_angle =
+                hand_rotation_sec(seconds, 60.0).0 - std::f32::consts::FRAC_PI_2 * 2.0;
 
             frame.translate(Vector::new(center.x, center.y));
 
-            let hour_hand_angle = Radians::from(hand_rotation(now.hour(), 12)) + minutes_portion;
+            // hours
+            let hour_circle_r = radius * 0.03;
+            let hour_neck_len = radius * 0.12;
+            let hour_body_len = radius * 0.55;
+            let hour_neck_width = radius / 30.0;
+            let hour_body_width = radius / 15.0;
+            let hour_circle = Path::circle(Point::ORIGIN, hour_circle_r);
 
-            // часовая стрелка
+            let hour_neck = Path::new(|p| {
+                p.move_to(Point::new(0.0, -hour_circle_r));
+                p.line_to(Point::new(0.0, -(hour_circle_r + hour_neck_len)));
+            });
+
+            let hour_body = Path::new(|p| {
+                p.move_to(Point::new(0.0, -(hour_circle_r + hour_neck_len)));
+                p.line_to(Point::new(0.0, -hour_body_len));
+            });
             frame.with_save(|frame| {
                 frame.rotate(hour_hand_angle);
-                frame.stroke(&hour_hand, wide_stroke());
-            });
-
-            // минутная стрелка
-            frame.with_save(|frame| {
-                let minute_angle = hand_rotation(now.minute() * 15 + now.second() / 4, 900);
-
                 frame.with_save(|f| {
-                    f.rotate(minute_angle);
-                    f.translate(Vector::new(-2.0, 0.0));
-                    f.stroke(
-                        &minute_hand,
-                        Stroke {
-                            width: width * 6.5,
-                            style: stroke::Style::Solid(Color {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                                a: 0.6,
-                            }),
-                            line_cap: LineCap::Round,
-                            ..Stroke::default()
-                        },
-                    );
-                });
-
-                frame.rotate(minute_angle);
-                frame.stroke(&minute_hand, wide_stroke());
-            });
-
-            // секундная стрелка
-            frame.with_save(|frame| {
-                let seconds = now.second() as f32 + now.nanosecond() as f32 / 1_000_000_000.0;
-                let rotation =
-                    hand_rotation_sec(seconds, 60.0).0 - std::f32::consts::FRAC_PI_2 * 2.0;
-
-                frame.with_save(|f| {
-                    f.rotate(rotation);
                     f.translate(Vector::new(2.0, 2.0));
+                    let shadow = Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.3,
+                    };
                     f.stroke(
-                        &second_hand,
+                        &hour_neck,
                         Stroke {
-                            width: width * 1.2,
-                            style: stroke::Style::Solid(Color {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                                a: 0.3,
-                            }),
+                            width: hour_neck_width,
+                            style: stroke::Style::Solid(shadow),
+                            line_cap: LineCap::Round,
+                            ..Stroke::default()
+                        },
+                    );
+                    f.stroke(
+                        &hour_body,
+                        Stroke {
+                            width: hour_body_width,
+                            style: stroke::Style::Solid(shadow),
+                            line_cap: LineCap::Round,
+                            ..Stroke::default()
+                        },
+                    );
+                });
+                frame.stroke(
+                    &hour_circle,
+                    Stroke {
+                        width: hour_neck_width,
+                        style: stroke::Style::Solid(palette.text),
+                        ..Stroke::default()
+                    },
+                );
+                frame.stroke(
+                    &hour_neck,
+                    Stroke {
+                        width: hour_neck_width,
+                        style: stroke::Style::Solid(palette.text),
+                        line_cap: LineCap::Round,
+                        ..Stroke::default()
+                    },
+                );
+                frame.stroke(
+                    &hour_body,
+                    Stroke {
+                        width: hour_body_width,
+                        style: stroke::Style::Solid(palette.text),
+                        line_cap: LineCap::Round,
+                        ..Stroke::default()
+                    },
+                );
+            });
+
+            // minutes
+            let min_circle_r = radius * 0.03;
+            let min_neck_len = radius * 0.12;
+            let min_body_len = radius * 0.95;
+            let min_neck_width = radius / 30.0;
+            let min_body_width = radius / 15.0;
+
+            let min_circle = Path::circle(Point::ORIGIN, min_circle_r);
+
+            let min_neck = Path::new(|p| {
+                p.move_to(Point::new(0.0, -min_circle_r));
+                p.line_to(Point::new(0.0, -(min_circle_r + min_neck_len)));
+            });
+
+            let min_body = Path::new(|p| {
+                p.move_to(Point::new(0.0, -(min_circle_r + min_neck_len)));
+                p.line_to(Point::new(0.0, -min_body_len));
+            });
+
+            frame.with_save(|frame| {
+                frame.rotate(minute_angle);
+
+                frame.with_save(|f| {
+                    f.translate(Vector::new(2.0, 2.0));
+                    let shadow = Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.3,
+                    };
+                    f.stroke(
+                        &min_neck,
+                        Stroke {
+                            width: min_neck_width,
+                            style: stroke::Style::Solid(shadow),
+                            line_cap: LineCap::Round,
+                            ..Stroke::default()
+                        },
+                    );
+                    f.stroke(
+                        &min_body,
+                        Stroke {
+                            width: min_body_width,
+                            style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
                         },
                     );
                 });
 
-                frame.rotate(rotation);
-                frame.stroke(&second_hand, thin_stroke());
+                frame.stroke(
+                    &min_circle,
+                    Stroke {
+                        width: min_neck_width,
+                        style: stroke::Style::Solid(palette.text),
+                        ..Stroke::default()
+                    },
+                );
+
+                frame.stroke(
+                    &min_neck,
+                    Stroke {
+                        width: min_neck_width,
+                        style: stroke::Style::Solid(palette.text),
+                        line_cap: LineCap::Round,
+                        ..Stroke::default()
+                    },
+                );
+
+                frame.stroke(
+                    &min_body,
+                    Stroke {
+                        width: min_body_width,
+                        style: stroke::Style::Solid(palette.text),
+                        line_cap: LineCap::Round,
+                        ..Stroke::default()
+                    },
+                );
+            });
+
+            // seconds
+            let sec_tail_len = radius * 0.1;
+            let sec_line_len = radius;
+            let sec_circle_r = radius * 0.02;
+            let sec_width = radius / 80.0;
+
+            let sec_tail = Path::new(|p| {
+                p.move_to(Point::new(0.0, sec_tail_len));
+                p.line_to(Point::new(0.0, sec_circle_r));
+            });
+
+            let sec_line = Path::new(|p| {
+                p.move_to(Point::new(0.0, -sec_circle_r));
+                p.line_to(Point::new(0.0, -sec_line_len));
+            });
+
+            let sec_circle = Path::circle(Point::ORIGIN, sec_circle_r);
+
+            frame.with_save(|frame| {
+                frame.rotate(second_angle);
+
+                frame.with_save(|f| {
+                    f.translate(Vector::new(1.5, 1.5));
+                    let shadow = Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.25,
+                    };
+                    let shadow_stroke = Stroke {
+                        width: sec_width,
+                        style: stroke::Style::Solid(shadow),
+                        line_cap: LineCap::Round,
+                        ..Stroke::default()
+                    };
+                    f.stroke(&sec_tail, shadow_stroke.clone());
+                    f.stroke(&sec_line, shadow_stroke);
+                });
+
+                let sec_stroke = Stroke {
+                    width: sec_width,
+                    style: stroke::Style::Solid(palette.warning),
+                    line_cap: LineCap::Round,
+                    ..Stroke::default()
+                };
+
+                frame.stroke(&sec_tail, sec_stroke.clone());
+                frame.stroke(&sec_line, sec_stroke);
+
+                frame.stroke(
+                    &sec_circle,
+                    Stroke {
+                        width: sec_width,
+                        style: stroke::Style::Solid(palette.warning),
+                        ..Stroke::default()
+                    },
+                );
             });
         });
-
         vec![dynamic_layer]
     }
 }
@@ -1539,7 +1664,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
 
             frame.translate(Vector::new(center.x, center.y));
 
-            let radius = frame.width().min(frame.height()) / 2.4;
+            let radius = frame.width().min(frame.height()) / 2.5;
 
             for hour in 1..=12 {
                 let angle = Radians::from(hand_rotation(hour, 12)) - Radians::from(Degrees(90.0));
@@ -1567,7 +1692,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
                     radius * 0.016
                 } else {
                     color = palette.danger;
-                    radius * 0.0095
+                    radius * 0.016
                 };
 
                 frame.with_save(|frame| {
@@ -1982,7 +2107,7 @@ impl WorldClockFull {
             "../icons/world_map.svg"
         )))
         .style(move |_theme: &Theme, _status| svg::Style {
-            color: Some(theme.palette().primary),
+            color: Some(theme.palette().text),
         })
         .height(Length::Fill)
         .width(size.width * 0.85);
@@ -2033,7 +2158,7 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
                         size: Pixels(50.0 * scale),
                         position: Point::new(
                             frame.center().x - (bounds.width * 0.45),
-                            frame.center().y + (bounds.height * 0.2),
+                            frame.center().y + (bounds.height * 0.15),
                         ),
                         color: palette.warning,
                         align_y: alignment::Vertical::Center,
@@ -2043,11 +2168,11 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{}:{}", time.hour(), time.minute()),
+                        content: format!("{}:{:2}", time.hour(), time.minute()),
                         size: Pixels(200.0 * scale),
                         position: Point::new(
                             frame.center().x - (bounds.width * 0.45),
-                            frame.center().y + (bounds.height * 0.3),
+                            frame.center().y + (bounds.height * 0.25),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Center,
