@@ -502,7 +502,12 @@ impl Default for Application {
                 ))),
             ],
             page0_right: vec![
-                AppWidget::Calendar(CalendarWidget::default()),
+                AppWidget::Calendar(CalendarWidget::new(CalendarStyle::MonthHalf(
+                    MonthCalendarHalf::default(),
+                ))),
+                AppWidget::Calendar(CalendarWidget::new(CalendarStyle::DateHalf(
+                    DateCalendarHalf::default(),
+                ))),
                 AppWidget::Weather(WeatherWidget::default()),
                 AppWidget::Weather(WeatherWidget::new(WeatherStyle::DetailedHalf(
                     DetailedForecastHalf::default(),
@@ -1049,13 +1054,56 @@ trait ClearCache {
     fn clear_cache(&self);
 }
 
-#[derive(Default)]
 struct CalendarWidget {
+    style: CalendarStyle,
+}
+
+impl CalendarWidget {
+    fn new(style: CalendarStyle) -> Self {
+        Self { style }
+    }
+
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        self.style.view(time)
+    }
+}
+
+impl ClearCache for CalendarWidget {
+    fn clear_cache(&self) {
+        self.style.clear_cache();
+    }
+}
+
+enum CalendarStyle {
+    MonthHalf(MonthCalendarHalf),
+    DateHalf(DateCalendarHalf),
+}
+
+impl CalendarStyle {
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        match self {
+            CalendarStyle::MonthHalf(c) => c.view(time),
+            CalendarStyle::DateHalf(c) => c.view(time),
+        }
+    }
+}
+
+impl ClearCache for CalendarStyle {
+    fn clear_cache(&self) {
+        match self {
+            CalendarStyle::MonthHalf(c) => c.cache.clear(),
+            CalendarStyle::DateHalf(c) => c.cache.clear(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct MonthCalendarHalf {
     last_day: Cell<u32>,
     cache: Cache,
 }
 
-impl CalendarWidget {
+impl MonthCalendarHalf {
     fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
@@ -1069,7 +1117,7 @@ impl CalendarWidget {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local>) {
     type State = ();
 
     fn draw(
@@ -1193,9 +1241,84 @@ impl<'a> canvas::Program<Message> for (&'a CalendarWidget, &'a DateTime<Local>) 
     }
 }
 
-impl ClearCache for CalendarWidget {
-    fn clear_cache(&self) {
-        self.cache.clear();
+#[derive(Default)]
+struct DateCalendarHalf {
+    last_day: Cell<u32>,
+    cache: Cache,
+}
+
+impl DateCalendarHalf {
+    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        if time.day() != self.last_day.get() {
+            self.last_day.set(time.day());
+            self.cache.clear();
+        }
+
+        canvas((self, time))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+}
+
+impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>) {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let (widget, time) = self;
+        let palette = theme.palette();
+
+        let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
+            frame.with_save(|frame| {
+                frame.fill_text(canvas::Text {
+                    content: format!("{:3}", time.weekday()),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) / 2.4),
+                    position: Point::new(
+                        frame.center().x - frame.width() * 0.05,
+                        frame.center().y - frame.width() * 0.25,
+                    ),
+                    color: color!(255, 0, 0),
+                    align_y: alignment::Vertical::Bottom,
+                    align_x: text::Alignment::Right,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+
+                frame.fill_text(canvas::Text {
+                    content: time.format("%b").to_string(),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) / 2.4),
+                    position: Point::new(
+                        frame.center().x + frame.width() * 0.05,
+                        frame.center().y - frame.width() * 0.25,
+                    ),
+                    color: palette.danger,
+                    align_y: alignment::Vertical::Bottom,
+                    align_x: text::Alignment::Left,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+
+                frame.fill_text(canvas::Text {
+                    content: format!("{}", time.day()),
+                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 1.5),
+                    position: Point::new(frame.center().x, frame.center().y + frame.width() * 0.05),
+                    color: palette.text,
+                    align_y: alignment::Vertical::Center,
+                    align_x: text::Alignment::Center,
+                    font: SF_PRO_DISPLAY_BOLD,
+                    ..canvas::Text::default()
+                });
+            });
+        });
+
+        vec![dynamic_layer]
     }
 }
 
@@ -1570,7 +1693,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
             });
 
             // seconds
-            let sec_tail_len = radius * 0.1;
+            let sec_tail_len = radius * 0.16;
             let sec_line_len = radius;
             let sec_circle_r = radius * 0.02;
             let sec_width = radius / 80.0;
