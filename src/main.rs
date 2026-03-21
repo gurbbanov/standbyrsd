@@ -1170,8 +1170,8 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
             let offset_y = (h - total_h) * 0.5;
 
             frame.fill_text(canvas::Text {
-                content: format!("{}", now.format("%B")),
-                position: Point::new(offset_x * 1.3, offset_y + month_font_size * 0.5),
+                content: format!(" {}", now.format("%B")),
+                position: Point::new(offset_x, offset_y + month_font_size * 0.5),
                 size: month_font_size.into(),
                 color: color!(255, 0, 0),
                 font: SF_PRO_ROUNDED_BLACK,
@@ -1277,16 +1277,15 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, time) = self;
         let palette = theme.palette();
-
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             frame.with_save(|frame| {
+                let size = frame.width().min(frame.height());
+                let center = Point::new(frame.width() / 2.0, frame.height() / 2.0);
+
                 frame.fill_text(canvas::Text {
                     content: format!("{:3}", time.weekday()),
-                    size: Pixels((frame.width() / 2.0).min(frame.height()) / 2.4),
-                    position: Point::new(
-                        frame.center().x - frame.width() * 0.05,
-                        frame.center().y - frame.width() * 0.25,
-                    ),
+                    size: Pixels(size * 0.2),
+                    position: Point::new(center.x - size * 0.02, center.y - size * 0.25),
                     color: color!(255, 0, 0),
                     align_y: alignment::Vertical::Bottom,
                     align_x: text::Alignment::Right,
@@ -1296,11 +1295,8 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
 
                 frame.fill_text(canvas::Text {
                     content: time.format("%b").to_string(),
-                    size: Pixels((frame.width() / 2.0).min(frame.height()) / 2.4),
-                    position: Point::new(
-                        frame.center().x + frame.width() * 0.05,
-                        frame.center().y - frame.width() * 0.25,
-                    ),
+                    size: Pixels(size * 0.2),
+                    position: Point::new(center.x + size * 0.02, center.y - size * 0.25),
                     color: palette.danger,
                     align_y: alignment::Vertical::Bottom,
                     align_x: text::Alignment::Left,
@@ -1310,8 +1306,8 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
 
                 frame.fill_text(canvas::Text {
                     content: format!("{}", time.day()),
-                    size: Pixels((frame.width() / 2.0).min(frame.height()) * 1.5),
-                    position: Point::new(frame.center().x, frame.center().y + frame.width() * 0.05),
+                    size: Pixels(size * 0.8),
+                    position: Point::new(center.x, center.y + size * 0.05),
                     color: palette.text,
                     align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
@@ -1320,7 +1316,6 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
                 });
             });
         });
-
         vec![dynamic_layer]
     }
 }
@@ -1392,6 +1387,7 @@ impl ClearCache for ClockStyle {
         match self {
             ClockStyle::AnalogueHalf(clock) => clock.clear_cache(),
             ClockStyle::MinimalHalf(clock) => clock.clear_cache(),
+            ClockStyle::AnalogueRectHalf(clock) => clock.clear_cache(),
             ClockStyle::AnalogueRectFull(clock) => clock.clear_cache(),
             ClockStyle::WorldFull(clock) => clock.clear_cache(),
             _ => {}
@@ -1560,6 +1556,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
                 p.move_to(Point::new(0.0, -(hour_circle_r + hour_neck_len)));
                 p.line_to(Point::new(0.0, -hour_body_len));
             });
+
             frame.with_save(|frame| {
                 frame.rotate(hour_hand_angle);
                 frame.with_save(|f| {
@@ -1568,27 +1565,30 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
                         r: 0.0,
                         g: 0.0,
                         b: 0.0,
-                        a: 0.3,
+                        a: 0.6,
                     };
+
                     f.stroke(
                         &hour_neck,
                         Stroke {
-                            width: hour_neck_width,
+                            width: hour_neck_width * 1.5,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
                         },
                     );
+
                     f.stroke(
                         &hour_body,
                         Stroke {
-                            width: hour_body_width,
+                            width: hour_body_width * 1.5,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
                         },
                     );
                 });
+
                 frame.stroke(
                     &hour_circle,
                     Stroke {
@@ -1597,6 +1597,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
                         ..Stroke::default()
                     },
                 );
+
                 frame.stroke(
                     &hour_neck,
                     Stroke {
@@ -1606,6 +1607,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
                         ..Stroke::default()
                     },
                 );
+
                 frame.stroke(
                     &hour_body,
                     Stroke {
@@ -1641,25 +1643,28 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
 
                 frame.with_save(|f| {
                     f.translate(Vector::new(2.0, 2.0));
+
                     let shadow = Color {
                         r: 0.0,
                         g: 0.0,
                         b: 0.0,
-                        a: 0.3,
+                        a: 0.6,
                     };
+
                     f.stroke(
                         &min_neck,
                         Stroke {
-                            width: min_neck_width,
+                            width: min_neck_width * 1.5,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
                         },
                     );
+
                     f.stroke(
                         &min_body,
                         Stroke {
-                            width: min_body_width,
+                            width: min_body_width * 1.5,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
@@ -1796,6 +1801,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
 
             for hour in 1..=12 {
                 let angle = Radians::from(hand_rotation(hour, 12)) - Radians::from(Degrees(90.0));
+
                 let x = radius * angle.0.cos();
                 let y = radius * angle.0.sin();
 
@@ -1962,29 +1968,27 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
         let palette = theme.palette();
 
         let static_layer = self.cache.draw(renderer, bounds.size(), |frame| {
-            let scale = ((frame.width() / 2.0) + frame.height()) / (960.0 + 1080.0);
+            let size = frame.width().min(frame.height());
+            let scale = size / 960.0;
+
+            let offset_x = (frame.width() - size) / 2.0;
+            let offset_y = (frame.height() - size) / 2.0;
 
             let padding = scale * 70.0;
-            let inner_padding_hourtb = scale * 250.0; //inner padding for hours located at top and bottom
-            let inner_padding_hourlr = scale * 130.0; //inner padding for hours located at left and right
-            let inner_padding_min = scale * 200.0;
+            let inner_padding_hour = scale * 130.0;
+            let inner_padding_min = scale * 30.0;
 
-            let top_left = Point::new(padding, padding * 2.0);
-            let top_right = Point::new(frame.width() - padding, padding);
-            let bottom_right = Point::new(frame.width() - padding, frame.height() - padding);
-            let bottom_left = Point::new(padding, frame.height() - padding * 2.0);
-
-            let center = frame.center();
+            let top_left = Point::new(offset_x + padding, offset_y + padding);
+            let bottom_left = Point::new(offset_x + padding, offset_y + size - padding);
+            let width = size - padding * 2.0;
+            let height = size - padding * 2.0;
+            let center = Point::new(offset_x + size / 2.0, offset_y + size / 2.0);
 
             let doli_minutes = vec![
-                0.0612, 0.1378, 0.2755, 0.3367, 0.3929, 0.4439, 0.5, 0.5561, 0.6071, 0.6633,
-                0.7245, 0.8622, 0.9388,
+                0.0612, 0.1378, 0.2755, 0.3367, 0.3929, 0.4439, 0.5561, 0.6071, 0.6633, 0.7245,
+                0.8622, 0.9388,
             ];
-
             let doli_hours = vec![0.2092, 0.5, 0.7908];
-
-            let width = frame.width() - padding * 2.0;
-            let height = frame.height() - padding * 4.0;
 
             frame.with_save(|frame| {
                 // upper side
@@ -1995,17 +1999,15 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = Point::new(
-                        point.x + (inner_padding_min - point.y) * (dx / dy),
-                        inner_padding_min,
+                        point.x + inner_padding_min * (dx / dy),
+                        point.y + inner_padding_min,
                     );
 
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.danger)
-                            .with_width(4.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -2017,21 +2019,19 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x, inner_padding_min)
+                        Point::new(point.x, point.y + inner_padding_min * 2.0)
                     } else {
                         Point::new(
-                            point.x + (inner_padding_hourtb - point.y) * (dx / dy),
-                            inner_padding_hourtb,
+                            point.x + inner_padding_hour * (dx / dy),
+                            point.y + inner_padding_hour,
                         )
                     };
 
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.primary)
-                            .with_width(10.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -2044,17 +2044,15 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = Point::new(
-                        point.x + ((frame.height() - inner_padding_min) - point.y) * (dx / dy),
-                        frame.height() - inner_padding_min,
+                        point.x - inner_padding_min * (dx / dy),
+                        point.y - inner_padding_min,
                     );
 
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.danger)
-                            .with_width(4.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -2066,22 +2064,19 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x, frame.height() - inner_padding_min)
+                        Point::new(point.x, point.y - inner_padding_min * 2.0)
                     } else {
                         Point::new(
-                            point.x
-                                + ((frame.height() - inner_padding_hourtb) - point.y) * (dx / dy),
-                            frame.height() - inner_padding_hourtb,
+                            point.x - inner_padding_hour * (dx / dy),
+                            point.y - inner_padding_hour,
                         )
                     };
 
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.primary)
-                            .with_width(10.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -2094,17 +2089,15 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = Point::new(
-                        inner_padding_hourlr,
-                        point.y + (inner_padding_hourlr - point.x) * (dy / dx),
+                        point.x + inner_padding_min,
+                        point.y + inner_padding_min * (dy / dx),
                     );
 
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.danger)
-                            .with_width(4.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -2116,21 +2109,19 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x + inner_padding_hourlr * 1.5, point.y)
+                        Point::new(point.x + inner_padding_min * 2.0, point.y)
                     } else {
                         Point::new(
-                            inner_padding_hourtb,
-                            point.y + (inner_padding_hourtb - point.x) * (dy / dx),
+                            point.x + inner_padding_hour,
+                            point.y + inner_padding_hour * (dy / dx),
                         )
                     };
 
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.primary)
-                            .with_width(10.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -2143,17 +2134,15 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = Point::new(
-                        frame.width() - inner_padding_hourlr,
-                        point.y + ((frame.width() - inner_padding_hourlr) - point.x) * (dy / dx),
+                        point.x - inner_padding_min,
+                        point.y - inner_padding_min * (dy / dx),
                     );
 
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.danger)
-                            .with_width(4.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
@@ -2165,54 +2154,55 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x - inner_padding_hourlr * 1.5, point.y)
+                        Point::new(point.x - inner_padding_min * 2.0, point.y)
                     } else {
                         Point::new(
-                            frame.width() - inner_padding_hourtb,
-                            point.y
-                                + ((frame.width() - inner_padding_hourtb) - point.x) * (dy / dx),
+                            point.x - inner_padding_hour,
+                            point.y - inner_padding_hour * (dy / dx),
                         )
                     };
-
-                    let line = Path::line(point, end_point);
-
                     frame.stroke(
-                        &line,
+                        &Path::line(point, end_point),
                         Stroke::default()
                             .with_color(palette.primary)
-                            .with_width(10.0 * scale)
+                            .with_width(6.0 * scale)
                             .with_line_cap(LineCap::Round),
                     );
                 }
 
                 let hours = vec![
-                    ("12", Point::new(frame.center().x, 210.0 * scale)),
+                    (
+                        "12",
+                        Point::new(center.x, offset_y + inner_padding_hour * 1.6),
+                    ),
                     (
                         "3",
-                        Point::new(frame.width() - 360.0 * scale, frame.center().y),
+                        Point::new(offset_x + size - inner_padding_hour * 1.6, center.y),
                     ),
                     (
                         "6",
-                        Point::new(frame.center().x, frame.height() - 210.0 * scale),
+                        Point::new(center.x, offset_y + size - inner_padding_hour * 1.6),
                     ),
-                    ("9", Point::new(360.0 * scale, frame.center().y)),
+                    (
+                        "9",
+                        Point::new(offset_x + inner_padding_hour * 1.6, center.y),
+                    ),
                 ];
 
                 for (hour, point) in hours {
                     frame.fill_text(canvas::Text {
-                        content: format!("{hour}"),
+                        content: hour.to_string(),
                         size: Pixels(125.0 * scale),
                         position: point,
                         color: palette.text,
                         align_x: text::Alignment::Center,
                         align_y: alignment::Vertical::Center,
-                        font: SF_PRO_EXPANDED_BOLD,
+                        font: SF_PRO_DISPLAY_BOLD,
                         ..canvas::Text::default()
                     });
                 }
             })
         });
-
         vec![static_layer]
     }
 }
