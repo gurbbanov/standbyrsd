@@ -21,6 +21,10 @@ use reqwest;
 use serde::Deserialize;
 use std::cell::Cell;
 use std::time::{Duration, Instant};
+#[cfg(target_os = "windows")]
+use windows::Media::Control::{
+    GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
+};
 
 const SF_PRO_EXPANDED_BOLD: Font = Font {
     family: Family::Name("SF Pro"),
@@ -116,6 +120,11 @@ struct Application {
     page1_widgets: Vec<AppWidget>,
     theme: Animated<Theme>,
     fullscreen: bool,
+    #[cfg(target_os = "windows")]
+    playerctl: Option<GlobalSystemMediaTransportControlsSessionManager>,
+    #[cfg(target_os = "windows")]
+    session: Option<GlobalSystemMediaTransportControlsSession>,
+    media_metadata: Option<MediaMetadata>,
     main_window: Option<window::Id>,
     current_page: usize,
     page_width: f32,
@@ -136,6 +145,14 @@ enum Message {
     SnapTick(Instant),
     AnimTick(Instant),
     UpdatePageWidth(f32),
+    GetPlayer,
+    PlayerInit(GlobalSystemMediaTransportControlsSessionManager),
+    MetadataInit(Option<MediaMetadata>),
+    Play,
+    Pause,
+    NextTrack,
+    PreviousTrack,
+    None,
 }
 
 impl Application {
@@ -144,6 +161,7 @@ impl Application {
             Self::default(),
             Task::batch([
                 Task::done(Message::OpenMainWindow),
+                Task::done(Message::GetPlayer),
                 Task::done(Message::FetchWeather),
             ]),
         )
@@ -235,6 +253,50 @@ impl Application {
             }
             Message::WindowOpened(id) => {
                 self.main_window = Some(id);
+                Task::none()
+            }
+            Message::GetPlayer =>
+            {
+                #[cfg(target_os = "windows")]
+                Task::perform(
+                    async {
+                        GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
+                            .unwrap()
+                            .await
+                            .unwrap()
+                    },
+                    Message::PlayerInit,
+                )
+            }
+            Message::PlayerInit(playerctl) => {
+                self.playerctl = Some(playerctl.clone());
+                self.session = Some(playerctl.clone().GetCurrentSession().unwrap());
+
+                let session = playerctl.GetCurrentSession().unwrap();
+
+                Task::perform(
+                    async move {
+                        let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
+                        let timeline = session.GetTimelineProperties().ok()?;
+                        let playback = session.GetPlaybackInfo().ok()?;
+
+                        Some(MediaMetadata {
+                            title: info.Title().ok()?.to_string(),
+                            artist: info.Artist().ok()?.to_string(),
+                            position: timeline.Position().ok()?.Duration,
+                            duration: timeline.EndTime().ok()?.Duration,
+                            is_playing: matches! {
+                                playback.PlaybackStatus().ok()?,
+                                windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
+                            },
+                            thumbnail: None,
+                        })
+                    },
+                    Message::MetadataInit,
+                )
+            }
+            Message::MetadataInit(metadata) => {
+                self.media_metadata = metadata;
                 Task::none()
             }
             Message::ToggleTheme => {
@@ -356,6 +418,67 @@ impl Application {
                 self.page_width = w;
                 Task::none()
             }
+            Message::Play => {
+                #[cfg(target_os = "windows")]
+                {
+                    let session = self.session.clone();
+                    Task::perform(
+                        async move {
+                            if let Some(s) = session {
+                                s.TryPlayAsync().unwrap().await.unwrap();
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::GetPlayer,
+                    )
+                }
+            }
+            Message::Pause => {
+                #[cfg(target_os = "windows")]
+                {
+                    let session = self.session.clone();
+                    Task::perform(
+                        async move {
+                            if let Some(s) = session {
+                                s.TryPauseAsync().unwrap().await.unwrap();
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::GetPlayer,
+                    )
+                }
+            }
+            Message::NextTrack => {
+                #[cfg(target_os = "windows")]
+                {
+                    let session = self.session.clone();
+                    Task::perform(
+                        async move {
+                            if let Some(s) = session {
+                                s.TrySkipNextAsync().unwrap().await.unwrap();
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::GetPlayer,
+                    )
+                }
+            }
+            Message::PreviousTrack => {
+                #[cfg(target_os = "windows")]
+                {
+                    let session = self.session.clone();
+                    Task::perform(
+                        async move {
+                            if let Some(s) = session {
+                                s.TrySkipPreviousAsync().unwrap().await.unwrap();
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::GetPlayer,
+                    )
+                }
+            }
+            Message::None => Task::none(),
         }
     }
 
@@ -426,10 +549,16 @@ impl Application {
             .page0_left
             .iter()
             .map(|w| {
-                container(w.view(&self.time, &self.weather, &self.theme.value(), size))
-                    .width(Length::Fixed(sw))
-                    .height(Length::Fixed(sh))
-                    .into()
+                container(w.view(
+                    &self.time,
+                    &self.weather,
+                    &self.theme.value(),
+                    &self.media_metadata,
+                    size,
+                ))
+                .width(Length::Fixed(sw))
+                .height(Length::Fixed(sh))
+                .into()
             })
             .collect();
 
@@ -437,10 +566,16 @@ impl Application {
             .page0_right
             .iter()
             .map(|w| {
-                container(w.view(&self.time, &self.weather, &self.theme.value(), size))
-                    .width(Length::Fixed(sw))
-                    .height(Length::Fixed(sh))
-                    .into()
+                container(w.view(
+                    &self.time,
+                    &self.weather,
+                    &self.theme.value(),
+                    &self.media_metadata,
+                    size,
+                ))
+                .width(Length::Fixed(sw))
+                .height(Length::Fixed(sh))
+                .into()
             })
             .collect();
 
@@ -474,10 +609,16 @@ impl Application {
             .page1_widgets
             .iter()
             .map(|w| {
-                container(w.view(&self.time, &self.weather, &self.theme.value(), size))
-                    .width(Length::Fixed(size.width))
-                    .height(Length::Fixed(size.height))
-                    .into()
+                container(w.view(
+                    &self.time,
+                    &self.weather,
+                    &self.theme.value(),
+                    &self.media_metadata,
+                    size,
+                ))
+                .width(Length::Fixed(size.width))
+                .height(Length::Fixed(size.height))
+                .into()
             })
             .collect();
 
@@ -518,6 +659,9 @@ impl Default for Application {
                 AppWidget::Weather(WeatherWidget::new(WeatherStyle::DailyHalf(
                     DailyForecastHalf::default(),
                 ))),
+                AppWidget::Media(MediaWidget {
+                    style: MediaStyle::MediaHalf(MediaWidgetHalf::default()),
+                }),
             ],
             page1_widgets: vec![
                 AppWidget::Clock(ClockWidget::new(ClockStyle::WorldFull(
@@ -542,6 +686,11 @@ impl Default for Application {
                 ),
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
             ),
+            #[cfg(target_os = "windows")]
+            playerctl: None,
+            #[cfg(target_os = "windows")]
+            session: None,
+            media_metadata: None,
             fullscreen: false,
             main_window: None,
             current_page: 0,
@@ -1027,6 +1176,7 @@ enum AppWidget {
     Calendar(CalendarWidget),
     Clock(ClockWidget),
     Weather(WeatherWidget),
+    Media(MediaWidget),
 }
 
 impl AppWidget {
@@ -1035,12 +1185,14 @@ impl AppWidget {
         time: &'a DateTime<Local>,
         weather: &'a WeatherStatus,
         theme: &'a Theme,
+        media_metadata: &'a Option<MediaMetadata>,
         size: Size,
     ) -> Element<'a, Message> {
         match self {
             AppWidget::Clock(w) => w.view(time, weather, theme, size),
             AppWidget::Calendar(w) => w.view(time),
             AppWidget::Weather(w) => w.view(theme, time, weather, size),
+            AppWidget::Media(w) => w.view(media_metadata, theme, size),
         }
     }
 
@@ -1049,6 +1201,7 @@ impl AppWidget {
             AppWidget::Clock(w) => w.clear_cache(),
             AppWidget::Calendar(w) => w.clear_cache(),
             AppWidget::Weather(w) => w.clear_cache(),
+            AppWidget::Media(w) => w.clear_cache(),
         }
     }
 }
@@ -3564,6 +3717,167 @@ impl<'a> canvas::Program<Message>
         };
         vec![static_layer]
     }
+}
+
+struct MediaWidget {
+    style: MediaStyle,
+}
+
+impl MediaWidget {
+    fn view<'a>(
+        &'a self,
+        media_metadata: &'a Option<MediaMetadata>,
+        theme: &'a Theme,
+        size: Size,
+    ) -> Element<'a, Message> {
+        self.style.view(media_metadata, theme, size)
+    }
+}
+
+impl ClearCache for MediaWidget {
+    fn clear_cache(&self) {
+        self.style.clear_cache();
+    }
+}
+
+enum MediaStyle {
+    MediaHalf(MediaWidgetHalf),
+    MediaFull,
+}
+
+impl MediaStyle {
+    fn view<'a>(
+        &'a self,
+        media_metadata: &'a Option<MediaMetadata>,
+        theme: &'a Theme,
+        size: Size,
+    ) -> Element<'a, Message> {
+        match self {
+            MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl ClearCache for MediaStyle {
+    fn clear_cache(&self) {
+        match self {
+            MediaStyle::MediaHalf(m) => m.cache.clear(),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct MediaWidgetHalf {
+    cache: Cache,
+}
+
+impl MediaWidgetHalf {
+    fn view<'a>(
+        &'a self,
+        media_metadata: &'a Option<MediaMetadata>,
+        theme: &'a Theme,
+        size: Size,
+    ) -> Element<'a, Message> {
+        let s = size.width.min(size.height);
+
+        let thumbnail = container(text(""))
+            .width(Length::Fixed(s * 0.35))
+            .height(Length::Fixed(s * 0.35))
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
+                border: iced::Border {
+                    radius: (s * 0.1).into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
+        let (title, artist, is_playing) = match media_metadata {
+            Some(m) => (m.title.clone(), m.artist.clone(), m.is_playing),
+            None => ("Not playing".to_string(), "—".to_string(), false),
+        };
+
+        let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
+            button(
+                svg(handle)
+                    .style(move |theme: &Theme, _status| svg::Style {
+                        color: Some(theme.palette().primary),
+                        ..Default::default()
+                    })
+                    .width(Length::Fixed(s * 0.12))
+                    .height(Length::Fixed(s * 0.12)),
+            )
+            .on_press(msg)
+            .style(|_, _| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .into()
+        };
+
+        let controls = row![
+            btn(
+                svg::Handle::from_memory(include_bytes!("../icons/previous.svg")),
+                Message::PreviousTrack
+            ),
+            if is_playing {
+                btn(
+                    svg::Handle::from_memory(include_bytes!("../icons/pause.svg")),
+                    Message::Pause,
+                )
+            } else {
+                btn(
+                    svg::Handle::from_memory(include_bytes!("../icons/play.svg")),
+                    Message::Play,
+                )
+            },
+            btn(
+                svg::Handle::from_memory(include_bytes!("../icons/next.svg")),
+                Message::NextTrack
+            ),
+        ]
+        .spacing(s * 0.15)
+        .align_y(iced::Alignment::Center);
+
+        let content = column![
+            thumbnail,
+            column![
+                text(title)
+                    .size(s * 0.04)
+                    .font(SF_PRO_DISPLAY_BOLD)
+                    .color(theme.palette().primary),
+                text(artist)
+                    .size(s * 0.03)
+                    .font(SF_PRO_DISPLAY_BOLD)
+                    .color(theme.palette().danger),
+            ]
+            .spacing(s * 0.02),
+            container(controls)
+                .width(Length::Fixed(s * 0.8))
+                .align_x(iced::Alignment::Center),
+        ]
+        .spacing(s * 0.1)
+        .align_x(iced::Alignment::Start);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+            .into()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MediaMetadata {
+    title: String,
+    artist: String,
+    position: i64,
+    duration: i64,
+    is_playing: bool,
+    thumbnail: Option<Vec<u8>>,
 }
 
 pub fn weekday_to_number(weekday: &Weekday) -> usize {
