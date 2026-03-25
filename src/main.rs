@@ -273,25 +273,45 @@ impl Application {
                 self.session = Some(playerctl.clone().GetCurrentSession().unwrap());
 
                 let session = playerctl.GetCurrentSession().unwrap();
+                let (tx, rx) = tokio::sync::oneshot::channel();
+
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async move {
+                        let result: Option<MediaMetadata> = async {
+                            let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
+                            let timeline = session.GetTimelineProperties().ok()?;
+                            let playback = session.GetPlaybackInfo().ok()?;
+
+                            let thumbnail = async {
+                                let stream = info.Thumbnail().ok()?.OpenReadAsync().ok()?.await.ok()?;
+                                let size = stream.Size().ok()? as u32;
+                                let reader = windows::Storage::Streams::DataReader::CreateDataReader(&stream).ok()?;
+                                reader.LoadAsync(size).ok()?.await.ok()?;
+                                let mut buf = vec![0u8; size as usize];
+                                reader.ReadBytes(&mut buf).ok()?;
+                                Some(iced::widget::image::Handle::from_bytes(buf))
+                            }.await;
+
+                            Some(MediaMetadata {
+                                title: info.Title().ok()?.to_string(),
+                                artist: info.Artist().ok()?.to_string(),
+                                position: timeline.Position().ok()?.Duration,
+                                duration: timeline.EndTime().ok()?.Duration,
+                                is_playing: matches!(
+                                    playback.PlaybackStatus().ok()?,
+                                    windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
+                                ),
+                                thumbnail,
+                            })
+                        }.await;
+
+                        let _ = tx.send(result);
+                    });
+                });
 
                 Task::perform(
-                    async move {
-                        let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
-                        let timeline = session.GetTimelineProperties().ok()?;
-                        let playback = session.GetPlaybackInfo().ok()?;
-
-                        Some(MediaMetadata {
-                            title: info.Title().ok()?.to_string(),
-                            artist: info.Artist().ok()?.to_string(),
-                            position: timeline.Position().ok()?.Duration,
-                            duration: timeline.EndTime().ok()?.Duration,
-                            is_playing: matches! {
-                                playback.PlaybackStatus().ok()?,
-                                windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
-                            },
-                            thumbnail: None,
-                        })
-                    },
+                    async move { rx.await.ok().flatten() },
                     Message::MetadataInit,
                 )
             }
@@ -863,30 +883,6 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
         }
     }
 
-    // fn mouse_interaction(
-    //     &self,
-    //     tree: &widget::Tree,
-    //     layout: Layout<'_>,
-    //     cursor: mouse::Cursor,
-    //     viewport: &Rectangle,
-    //     renderer: &Renderer,
-    // ) -> mouse::Interaction {
-    //     self.children
-    //         .iter()
-    //         .zip(layout.children())
-    //         .enumerate()
-    //         .map(|(i, (child, child_layout))| {
-    //             child.as_widget().mouse_interaction(
-    //                 &tree.children[i],
-    //                 child_layout,
-    //                 cursor,
-    //                 viewport,
-    //                 renderer,
-    //             )
-    //         })
-    //         .max()
-    //         .unwrap_or_default()
-    // }
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
@@ -3832,17 +3828,36 @@ impl MediaWidgetHalf {
     ) -> Element<'a, Message> {
         let s = size.width.min(size.height);
 
-        let thumbnail = container(text(""))
-            .width(Length::Fixed(s * 0.35))
-            .height(Length::Fixed(s * 0.35))
-            .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
-                border: iced::Border {
-                    radius: (s * 0.1).into(),
+        let thumbnail =
+            if let Some(handle) = media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref()) {
+                container(
+                    iced::widget::image(handle.clone())
+                        .width(Length::Fixed(s * 0.35))
+                        .height(Length::Fixed(s * 0.35))
+                        .content_fit(iced::ContentFit::Contain),
+                )
+                .width(Length::Fixed(s * 0.35))
+                .height(Length::Fixed(s * 0.35))
+                .style(move |_| container::Style {
+                    border: iced::Border {
+                        radius: (s * 0.2).into(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            });
+                })
+            } else {
+                container(text(""))
+                    .width(Length::Fixed(s * 0.35))
+                    .height(Length::Fixed(s * 0.35))
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
+                        border: iced::Border {
+                            radius: (s * 0.1).into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+            };
 
         let (title, artist, is_playing) = match media_metadata {
             Some(m) => (m.title.clone(), m.artist.clone(), m.is_playing),
@@ -3927,7 +3942,7 @@ struct MediaMetadata {
     position: i64,
     duration: i64,
     is_playing: bool,
-    thumbnail: Option<Vec<u8>>,
+    thumbnail: Option<iced::widget::image::Handle>,
 }
 
 pub fn weekday_to_number(weekday: &Weekday) -> usize {
