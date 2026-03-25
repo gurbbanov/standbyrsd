@@ -863,6 +863,30 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
         }
     }
 
+    // fn mouse_interaction(
+    //     &self,
+    //     tree: &widget::Tree,
+    //     layout: Layout<'_>,
+    //     cursor: mouse::Cursor,
+    //     viewport: &Rectangle,
+    //     renderer: &Renderer,
+    // ) -> mouse::Interaction {
+    //     self.children
+    //         .iter()
+    //         .zip(layout.children())
+    //         .enumerate()
+    //         .map(|(i, (child, child_layout))| {
+    //             child.as_widget().mouse_interaction(
+    //                 &tree.children[i],
+    //                 child_layout,
+    //                 cursor,
+    //                 viewport,
+    //                 renderer,
+    //             )
+    //         })
+    //         .max()
+    //         .unwrap_or_default()
+    // }
     fn mouse_interaction(
         &self,
         tree: &widget::Tree,
@@ -871,6 +895,13 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
+        let translated_cursor = match cursor {
+            mouse::Cursor::Available(pos) => {
+                mouse::Cursor::Available(Point::new(pos.x - self.offset, pos.y))
+            }
+            other => other,
+        };
+
         self.children
             .iter()
             .zip(layout.children())
@@ -879,7 +910,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
                 child.as_widget().mouse_interaction(
                     &tree.children[i],
                     child_layout,
-                    cursor,
+                    translated_cursor,
                     viewport,
                     renderer,
                 )
@@ -1094,7 +1125,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
         let sh = self.slot_height;
         let count = self.items.len();
 
-        {
+        let total_offset_y = {
             let state = tree.state.downcast_mut::<CarouselState>();
 
             if state.is_snap_done() {
@@ -1130,14 +1161,23 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
                     }
                 }
             }
-        }
+
+            state.total_offset(sh)
+        };
+
+        let translated_cursor = match cursor {
+            mouse::Cursor::Available(point) => {
+                mouse::Cursor::Available(point - Vector::new(0.0, total_offset_y))
+            }
+            other => other,
+        };
 
         for (i, (child, child_layout)) in self.items.iter_mut().zip(layout.children()).enumerate() {
             child.as_widget_mut().update(
                 &mut tree.children[i],
                 event,
                 child_layout,
-                cursor,
+                translated_cursor,
                 renderer,
                 clipboard,
                 shell,
@@ -1154,6 +1194,16 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
+        let state = tree.state.downcast_ref::<CarouselState>();
+        let total_offset_y = state.total_offset(self.slot_height);
+
+        let translated_cursor = match cursor {
+            mouse::Cursor::Available(point) => {
+                mouse::Cursor::Available(point - Vector::new(0.0, total_offset_y))
+            }
+            other => other,
+        };
+
         self.items
             .iter()
             .zip(layout.children())
@@ -1162,7 +1212,7 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
                 child.as_widget().mouse_interaction(
                     &tree.children[i],
                     child_layout,
-                    cursor,
+                    translated_cursor,
                     viewport,
                     renderer,
                 )

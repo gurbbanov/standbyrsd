@@ -14,6 +14,3 @@ geolocation = "*"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = {version = "*", features = ["Win32_UI_Input_KeyboardAndMouse", "Media_Control", "Foundation", "Storage_Streams"]}
-
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-souvlaki = "*"
