@@ -146,7 +146,10 @@ enum Message {
     AnimTick(Instant),
     UpdatePageWidth(f32),
     GetPlayer,
+    #[cfg(target_os = "windows")]
     PlayerInit(GlobalSystemMediaTransportControlsSessionManager),
+    #[cfg(target_os = "linux")]
+    PlayerInit,
     MetadataInit(Option<MediaMetadata>),
     Play,
     Pause,
@@ -255,8 +258,7 @@ impl Application {
                 self.main_window = Some(id);
                 Task::none()
             }
-            Message::GetPlayer =>
-            {
+            Message::GetPlayer => {
                 #[cfg(target_os = "windows")]
                 Task::perform(
                     async {
@@ -266,8 +268,12 @@ impl Application {
                             .unwrap()
                     },
                     Message::PlayerInit,
-                )
+                );
+
+                #[cfg(target_os = "linux")]
+                Task::done(Message::PlayerInit)
             }
+            #[cfg(target_os = "windows")]
             Message::PlayerInit(playerctl) => {
                 self.playerctl = Some(playerctl.clone());
                 self.session = Some(playerctl.clone().GetCurrentSession().unwrap());
@@ -315,8 +321,67 @@ impl Application {
                     Message::MetadataInit,
                 )
             }
+            #[cfg(target_os = "linux")]
+            Message::PlayerInit => {
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result: Option<MediaMetadata> = (|| {
+                        let finder = mpris::PlayerFinder::new().ok()?;
+                        let player = finder.find_active().ok()?;
+                        let metadata = player.get_metadata().ok()?;
+                        let playback = player.get_playback_status().ok()?;
+                        let position = player
+                            .get_position()
+                            .ok()
+                            .map(|p| p.as_micros() as i64)
+                            .unwrap_or(0);
+
+                        let title = metadata.title().unwrap_or("").to_string();
+                        let artist = metadata
+                            .artists()
+                            .and_then(|a| a.first().cloned())
+                            .unwrap_or("")
+                            .to_string();
+                        let duration = metadata.length().map(|d| d.as_micros() as i64).unwrap_or(0);
+                        let is_playing = matches!(playback, mpris::PlaybackStatus::Playing);
+
+                        let thumbnail = metadata
+                            .get("mpris:artUrl")
+                            .and_then(|v| v.as_str())
+                            .and_then(|url| {
+                                if url.starts_with("file://") {
+                                    std::fs::read(url.trim_start_matches("file://")).ok()
+                                } else if url.starts_with("http") {
+                                    reqwest::blocking::get(url)
+                                        .ok()
+                                        .and_then(|r| r.bytes().ok())
+                                        .map(|b| b.to_vec())
+                                } else {
+                                    None
+                                }
+                            });
+
+                        Some(MediaMetadata {
+                            title,
+                            artist,
+                            position,
+                            duration,
+                            is_playing,
+                            thumbnail: thumbnail.map(iced::widget::image::Handle::from_bytes),
+                        })
+                    })();
+
+                    let _ = tx.send(result);
+                });
+
+                Task::perform(
+                    async move { rx.await.ok().flatten() },
+                    Message::MetadataInit,
+                )
+            }
             Message::MetadataInit(metadata) => {
                 self.media_metadata = metadata;
+
                 Task::none()
             }
             Message::ToggleTheme => {
@@ -452,6 +517,22 @@ impl Application {
                         |_| Message::GetPlayer,
                     )
                 }
+
+                #[cfg(target_os = "linux")]
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let finder = mpris::PlayerFinder::new().ok()?;
+                            let player = finder.find_active().ok()?;
+                            player.play().ok()?;
+                            Some(())
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    |_| Message::GetPlayer,
+                )
             }
             Message::Pause => {
                 #[cfg(target_os = "windows")]
@@ -467,6 +548,22 @@ impl Application {
                         |_| Message::GetPlayer,
                     )
                 }
+
+                #[cfg(target_os = "linux")]
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let finder = mpris::PlayerFinder::new().ok()?;
+                            let player = finder.find_active().ok()?;
+                            player.pause().ok()?;
+                            Some(())
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    |_| Message::GetPlayer,
+                )
             }
             Message::NextTrack => {
                 #[cfg(target_os = "windows")]
@@ -482,6 +579,22 @@ impl Application {
                         |_| Message::GetPlayer,
                     )
                 }
+
+                #[cfg(target_os = "linux")]
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let finder = mpris::PlayerFinder::new().ok()?;
+                            let player = finder.find_active().ok()?;
+                            player.next().ok()?;
+                            Some(())
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    |_| Message::GetPlayer,
+                )
             }
             Message::PreviousTrack => {
                 #[cfg(target_os = "windows")]
@@ -497,6 +610,22 @@ impl Application {
                         |_| Message::GetPlayer,
                     )
                 }
+
+                #[cfg(target_os = "linux")]
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let finder = mpris::PlayerFinder::new().ok()?;
+                            let player = finder.find_active().ok()?;
+                            player.previous().ok()?;
+                            Some(())
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    |_| Message::GetPlayer,
+                )
             }
             Message::None => Task::none(),
         }
@@ -3838,13 +3967,6 @@ impl MediaWidgetHalf {
                 )
                 .width(Length::Fixed(s * 0.35))
                 .height(Length::Fixed(s * 0.35))
-                .style(move |_| container::Style {
-                    border: iced::Border {
-                        radius: (s * 0.2).into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
             } else {
                 container(text(""))
                     .width(Length::Fixed(s * 0.35))
@@ -3907,7 +4029,20 @@ impl MediaWidgetHalf {
         .align_y(iced::Alignment::Center);
 
         let content = column![
-            thumbnail,
+            stack![
+                thumbnail,
+                container(text(""))
+                    .width(Length::Fixed(s * 0.4))
+                    .height(Length::Fixed(s * 0.4))
+                    .style(move |_| container::Style {
+                        border: iced::Border {
+                            color: color!(0, 0, 0),
+                            width: s * 0.03,
+                            radius: (s * 0.04).into(),
+                        },
+                        ..Default::default()
+                    })
+            ],
             column![
                 text(title)
                     .size(s * 0.04)

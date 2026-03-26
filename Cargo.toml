@@ -14,3 +14,7 @@ geolocation = "*"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = {version = "*", features = ["Win32_UI_Input_KeyboardAndMouse", "Media_Control", "Foundation", "Storage_Streams"]}
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mpris = "2.0.1"
+reqwest = {version = "*", features = ["blocking"]}
