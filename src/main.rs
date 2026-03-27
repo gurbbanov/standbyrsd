@@ -150,7 +150,8 @@ enum Message {
     PlayerInit(GlobalSystemMediaTransportControlsSessionManager),
     #[cfg(target_os = "linux")]
     PlayerInit,
-    MetadataInit(Option<MediaMetadata>),
+    MetadataSave(Option<MediaMetadata>),
+    UpdateMetadata,
     Play,
     Pause,
     NextTrack,
@@ -260,15 +261,17 @@ impl Application {
             }
             Message::GetPlayer => {
                 #[cfg(target_os = "windows")]
-                Task::perform(
-                    async {
-                        GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
-                            .unwrap()
-                            .await
-                            .unwrap()
-                    },
-                    Message::PlayerInit,
-                );
+                {
+                    Task::perform(
+                        async {
+                            GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
+                                .unwrap()
+                                .await
+                                .unwrap()
+                        },
+                        Message::PlayerInit,
+                    )
+                }
 
                 #[cfg(target_os = "linux")]
                 Task::done(Message::PlayerInit)
@@ -318,7 +321,7 @@ impl Application {
 
                 Task::perform(
                     async move { rx.await.ok().flatten() },
-                    Message::MetadataInit,
+                    Message::MetadataSave,
                 )
             }
             #[cfg(target_os = "linux")]
@@ -376,10 +379,43 @@ impl Application {
 
                 Task::perform(
                     async move { rx.await.ok().flatten() },
-                    Message::MetadataInit,
+                    Message::MetadataSave,
                 )
             }
-            Message::MetadataInit(metadata) => {
+            #[cfg(target_os = "windows")]
+            Message::UpdateMetadata => {
+                let session = self
+                    .playerctl
+                    .as_ref()
+                    .unwrap()
+                    .GetCurrentSession()
+                    .unwrap();
+
+                let metadata = self.media_metadata.clone();
+
+                Task::perform(
+                    async move {
+                        let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
+                        let timeline = session.GetTimelineProperties().ok()?;
+                        let playback = session.GetPlaybackInfo().ok()?;
+                        let metadata = metadata?;
+
+                        Some(MediaMetadata {
+                            title: info.Title().ok()?.to_string(),
+                            artist: info.Artist().ok()?.to_string(),
+                            position: timeline.Position().ok()?.Duration,
+                            duration: timeline.EndTime().ok()?.Duration,
+                            is_playing: matches!(
+                                playback.PlaybackStatus().ok()?,
+                                windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
+                            ),
+                            ..metadata
+                        })
+                    },
+                    Message::MetadataSave,
+                )
+            }
+            Message::MetadataSave(metadata) => {
                 self.media_metadata = metadata;
 
                 Task::none()
@@ -634,6 +670,7 @@ impl Application {
     fn subscription(&self) -> Subscription<Message> {
         let clock = time::every(milliseconds(16)).map(|_| Message::Tick(chrono::Local::now()));
         let weather = time::every(seconds(600)).map(|_| Message::FetchWeather);
+        let metadata_update = time::every(seconds(1)).map(|_| Message::UpdateMetadata);
         let snap_idle = if matches!(self.drag, DragState::Active { .. }) {
             time::every(Duration::from_millis(16)).map(Message::SnapTick)
         } else {
@@ -644,7 +681,7 @@ impl Application {
         } else {
             Subscription::none()
         };
-        Subscription::batch([clock, weather, snap_idle, anim])
+        Subscription::batch([clock, weather, metadata_update, snap_idle, anim])
     }
 
     fn view(&self, _id: Id) -> Element<'_, Message> {
@@ -1634,7 +1671,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
 
                 frame.fill_text(canvas::Text {
                     content: format!("{}", time.day()),
-                    size: Pixels(size * 0.8),
+                    size: Pixels(size * 0.7),
                     position: Point::new(center.x, center.y + size * 0.05),
                     color: palette.text,
                     align_y: alignment::Vertical::Center,
@@ -1970,13 +2007,13 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
                 frame.rotate(minute_angle);
 
                 frame.with_save(|f| {
-                    f.translate(Vector::new(2.0, 2.0));
+                    f.translate(Vector::new(0.5, 0.5));
 
                     let shadow = Color {
                         r: 0.0,
                         g: 0.0,
                         b: 0.0,
-                        a: 0.6,
+                        a: 0.4,
                     };
 
                     f.stroke(
@@ -3963,7 +4000,7 @@ impl MediaWidgetHalf {
                     iced::widget::image(handle.clone())
                         .width(Length::Fixed(s * 0.35))
                         .height(Length::Fixed(s * 0.35))
-                        .content_fit(iced::ContentFit::Contain),
+                        .content_fit(iced::ContentFit::ScaleDown),
                 )
                 .width(Length::Fixed(s * 0.35))
                 .height(Length::Fixed(s * 0.35))
@@ -3981,9 +4018,15 @@ impl MediaWidgetHalf {
                     })
             };
 
-        let (title, artist, is_playing) = match media_metadata {
-            Some(m) => (m.title.clone(), m.artist.clone(), m.is_playing),
-            None => ("Not playing".to_string(), "—".to_string(), false),
+        let (title, artist, is_playing, position, duration) = match media_metadata {
+            Some(m) => (
+                m.title.clone(),
+                m.artist.clone(),
+                m.is_playing,
+                m.position / 10000000,
+                m.duration / 10000000,
+            ),
+            None => ("Not playing".to_string(), "—".to_string(), false, 0, 0),
         };
 
         let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
@@ -4029,20 +4072,7 @@ impl MediaWidgetHalf {
         .align_y(iced::Alignment::Center);
 
         let content = column![
-            stack![
-                thumbnail,
-                container(text(""))
-                    .width(Length::Fixed(s * 0.4))
-                    .height(Length::Fixed(s * 0.4))
-                    .style(move |_| container::Style {
-                        border: iced::Border {
-                            color: color!(0, 0, 0),
-                            width: s * 0.03,
-                            radius: (s * 0.04).into(),
-                        },
-                        ..Default::default()
-                    })
-            ],
+            thumbnail,
             column![
                 text(title)
                     .size(s * 0.04)
@@ -4054,11 +4084,28 @@ impl MediaWidgetHalf {
                     .color(theme.palette().danger),
             ]
             .spacing(s * 0.02),
+            container(
+                iced::widget::progress_bar(
+                    0.0..=100.0,
+                    position as f32 / (duration as f32 / 100.0),
+                )
+                .style(move |theme: &Theme| iced::widget::progress_bar::Style {
+                    background: iced::Background::Color(theme.palette().danger),
+                    bar: iced::Background::Color(theme.palette().primary),
+                    border: iced::Border {
+                        radius: (s * 0.05).into(),
+                        ..Default::default()
+                    },
+                })
+            )
+            .height(Length::Fixed(s * 0.02))
+            .width(Length::Fixed(s * 0.8))
+            .align_x(iced::Alignment::Center),
             container(controls)
                 .width(Length::Fixed(s * 0.8))
                 .align_x(iced::Alignment::Center),
         ]
-        .spacing(s * 0.1)
+        .spacing(s * 0.06)
         .align_x(iced::Alignment::Start);
 
         container(content)
