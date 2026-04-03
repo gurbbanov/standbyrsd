@@ -129,6 +129,7 @@ struct Application {
     current_page: usize,
     page_width: f32,
     drag: DragState,
+    metadata_updating: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -279,13 +280,20 @@ impl Application {
             #[cfg(target_os = "windows")]
             Message::PlayerInit(playerctl) => {
                 self.playerctl = Some(playerctl.clone());
-                self.session = Some(playerctl.clone().GetCurrentSession().unwrap());
 
-                let session = playerctl.GetCurrentSession().unwrap();
+                let session = match playerctl.GetCurrentSession().ok() {
+                    Some(s) => {
+                        self.session = Some(s.clone());
+                        s
+                    }
+                    None => return Task::none(),
+                };
+
                 let (tx, rx) = tokio::sync::oneshot::channel();
 
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Runtime::new().unwrap();
+
                     rt.block_on(async move {
                         let result: Option<MediaMetadata> = async {
                             let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
@@ -384,12 +392,15 @@ impl Application {
             }
             #[cfg(target_os = "windows")]
             Message::UpdateMetadata => {
-                let session = self
-                    .playerctl
-                    .as_ref()
-                    .unwrap()
-                    .GetCurrentSession()
-                    .unwrap();
+                if self.metadata_updating {
+                    return Task::none();
+                }
+
+                self.metadata_updating = true;
+                let session = match self.playerctl.as_ref().unwrap().GetCurrentSession().ok() {
+                    Some(s) => s,
+                    None => return Task::none(),
+                };
 
                 let metadata = self.media_metadata.clone();
 
@@ -416,6 +427,8 @@ impl Application {
                 )
             }
             Message::MetadataSave(metadata) => {
+                self.metadata_updating = false;
+
                 self.media_metadata = metadata;
 
                 Task::none()
@@ -882,6 +895,7 @@ impl Default for Application {
             current_page: 0,
             page_width: 800.0,
             drag: DragState::Idle,
+            metadata_updating: false,
         }
     }
 }
@@ -3993,6 +4007,7 @@ impl MediaWidgetHalf {
         size: Size,
     ) -> Element<'a, Message> {
         let s = size.width.min(size.height);
+        let palette = theme.palette();
 
         let thumbnail =
             if let Some(handle) = media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref()) {
@@ -4033,7 +4048,7 @@ impl MediaWidgetHalf {
             button(
                 svg(handle)
                     .style(move |theme: &Theme, _status| svg::Style {
-                        color: Some(theme.palette().primary),
+                        color: Some(palette.primary),
                         ..Default::default()
                     })
                     .width(Length::Fixed(s * 0.12))
@@ -4046,6 +4061,21 @@ impl MediaWidgetHalf {
             })
             .into()
         };
+
+        let fmt_time = |secs: i64| format!("{:02}:{:02}", secs / 60, secs % 60);
+
+        let timecode = row![
+            text(fmt_time(position))
+                .size(s * 0.03)
+                .color(palette.primary)
+                .font(SF_PRO_DISPLAY_BOLD),
+            iced::widget::Space::new().width(Length::Fill),
+            text(fmt_time(duration))
+                .size(s * 0.03)
+                .color(palette.primary)
+                .font(SF_PRO_DISPLAY_BOLD),
+        ]
+        .width(Length::Fixed(s * 0.8));
 
         let controls = row![
             btn(
@@ -4077,11 +4107,11 @@ impl MediaWidgetHalf {
                 text(title)
                     .size(s * 0.04)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(theme.palette().primary),
+                    .color(palette.primary),
                 text(artist)
                     .size(s * 0.03)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(theme.palette().danger),
+                    .color(palette.danger),
             ]
             .spacing(s * 0.02),
             container(
@@ -4090,8 +4120,8 @@ impl MediaWidgetHalf {
                     position as f32 / (duration as f32 / 100.0),
                 )
                 .style(move |theme: &Theme| iced::widget::progress_bar::Style {
-                    background: iced::Background::Color(theme.palette().danger),
-                    bar: iced::Background::Color(theme.palette().primary),
+                    background: iced::Background::Color(palette.danger),
+                    bar: iced::Background::Color(palette.primary),
                     border: iced::Border {
                         radius: (s * 0.05).into(),
                         ..Default::default()
@@ -4101,6 +4131,7 @@ impl MediaWidgetHalf {
             .height(Length::Fixed(s * 0.02))
             .width(Length::Fixed(s * 0.8))
             .align_x(iced::Alignment::Center),
+            timecode,
             container(controls)
                 .width(Length::Fixed(s * 0.8))
                 .align_x(iced::Alignment::Center),
