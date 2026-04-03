@@ -863,6 +863,9 @@ impl Default for Application {
                 }),
             ],
             page1_widgets: vec![
+                AppWidget::Media(MediaWidget {
+                    style: MediaStyle::MediaFull(MediaWidgetFull::default()),
+                }),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::WorldFull(
                     WorldClockFull::default(),
                 ))),
@@ -3968,7 +3971,7 @@ impl ClearCache for MediaWidget {
 
 enum MediaStyle {
     MediaHalf(MediaWidgetHalf),
-    MediaFull,
+    MediaFull(MediaWidgetFull),
 }
 
 impl MediaStyle {
@@ -3980,6 +3983,7 @@ impl MediaStyle {
     ) -> Element<'a, Message> {
         match self {
             MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size),
+            MediaStyle::MediaFull(m) => m.view(media_metadata, theme, size),
             _ => unimplemented!(),
         }
     }
@@ -3989,6 +3993,7 @@ impl ClearCache for MediaStyle {
     fn clear_cache(&self) {
         match self {
             MediaStyle::MediaHalf(m) => m.cache.clear(),
+            MediaStyle::MediaFull(m) => m.cache.clear(),
             _ => unimplemented!(),
         }
     }
@@ -4145,6 +4150,173 @@ impl MediaWidgetHalf {
             .align_x(iced::Alignment::Center)
             .align_y(iced::Alignment::Center)
             .into()
+    }
+}
+
+#[derive(Default)]
+struct MediaWidgetFull {
+    cache: Cache,
+}
+
+impl MediaWidgetFull {
+    fn view<'a>(
+        &'a self,
+        media_metadata: &'a Option<MediaMetadata>,
+        theme: &'a Theme,
+        size: Size,
+    ) -> Element<'a, Message> {
+        let s = size.width.min(size.height);
+        let palette = theme.palette();
+
+        let thumbnail =
+            if let Some(handle) = media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref()) {
+                container(
+                    iced::widget::image(handle.clone())
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .content_fit(iced::ContentFit::Cover),
+                )
+                .width(Length::Fixed(s * 0.9))
+                .height(Length::Fixed(s * 0.9))
+            } else {
+                container(text(""))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
+                        border: iced::Border {
+                            radius: (s * 0.1).into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+            };
+
+        let (title, artist, is_playing, position, duration) = match media_metadata {
+            Some(m) => (
+                m.title.clone(),
+                m.artist.clone(),
+                m.is_playing,
+                m.position / 10000000,
+                m.duration / 10000000,
+            ),
+            None => ("Not playing".to_string(), "—".to_string(), false, 0, 0),
+        };
+
+        let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
+            button(
+                svg(handle)
+                    .style(move |theme: &Theme, _status| svg::Style {
+                        color: Some(palette.primary),
+                        ..Default::default()
+                    })
+                    .width(Length::Fixed(s * 0.17))
+                    .height(Length::Fixed(s * 0.17)),
+            )
+            .on_press(msg)
+            .style(|_, _| button::Style {
+                background: None,
+                ..Default::default()
+            })
+            .into()
+        };
+
+        let fmt_time = |secs: i64| format!("{:02}:{:02}", secs / 60, secs % 60);
+
+        let timecode = row![
+            text(fmt_time(position))
+                .size(s * 0.03)
+                .color(palette.primary)
+                .font(SF_PRO_DISPLAY_BOLD),
+            iced::widget::Space::new().width(Length::Fill),
+            text(fmt_time(duration))
+                .size(s * 0.03)
+                .color(palette.primary)
+                .font(SF_PRO_DISPLAY_BOLD),
+        ]
+        .width(Length::Fixed(s * 0.8));
+
+        let controls = row![
+            btn(
+                svg::Handle::from_memory(include_bytes!("../icons/previous.svg")),
+                Message::PreviousTrack
+            ),
+            if is_playing {
+                btn(
+                    svg::Handle::from_memory(include_bytes!("../icons/pause.svg")),
+                    Message::Pause,
+                )
+            } else {
+                btn(
+                    svg::Handle::from_memory(include_bytes!("../icons/play.svg")),
+                    Message::Play,
+                )
+            },
+            btn(
+                svg::Handle::from_memory(include_bytes!("../icons/next.svg")),
+                Message::NextTrack
+            ),
+        ]
+        .spacing(s * 0.1)
+        .align_y(iced::Alignment::Center);
+
+        let content = column![
+            column![
+                text(title)
+                    .size(s * 0.07)
+                    .font(SF_PRO_DISPLAY_BOLD)
+                    .color(palette.primary),
+                text(artist)
+                    .size(s * 0.06)
+                    .font(SF_PRO_DISPLAY_BOLD)
+                    .color(palette.danger),
+            ]
+            .align_x(iced::Alignment::Center)
+            .spacing(s * 0.01),
+            container(controls)
+                .width(Length::Fixed(s * 0.8))
+                .align_x(iced::Alignment::Center),
+            column![
+                container(
+                    iced::widget::progress_bar(
+                        0.0..=100.0,
+                        position as f32 / (duration as f32 / 100.0),
+                    )
+                    .style(move |theme: &Theme| {
+                        iced::widget::progress_bar::Style {
+                            background: iced::Background::Color(palette.danger),
+                            bar: iced::Background::Color(palette.primary),
+                            border: iced::Border {
+                                radius: (s * 0.05).into(),
+                                ..Default::default()
+                            },
+                        }
+                    })
+                )
+                .height(Length::Fixed(s * 0.02))
+                .width(Length::Fixed(s * 0.8)),
+                timecode
+            ]
+            .spacing(s * 0.02),
+        ]
+        .spacing(s * 0.17)
+        .align_x(iced::Alignment::Center);
+
+        row![
+            container(thumbnail)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(s * 0.1)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center),
+            container(content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center),
+        ]
+        .height(Length::Fill)
+        .into()
     }
 }
 
