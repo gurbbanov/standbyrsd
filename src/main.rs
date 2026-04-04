@@ -744,6 +744,8 @@ impl Application {
         let sh = size.height;
         let sw = size.width / 2.0;
 
+        let slot_size = Size::new(sw, sh);
+
         let left_items: Vec<Element<'_, Message>> = self
             .page0_left
             .iter()
@@ -753,7 +755,7 @@ impl Application {
                     &self.weather,
                     &self.theme.value(),
                     &self.media_metadata,
-                    size,
+                    slot_size,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -770,7 +772,7 @@ impl Application {
                     &self.weather,
                     &self.theme.value(),
                     &self.media_metadata,
-                    size,
+                    slot_size,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -786,14 +788,14 @@ impl Application {
 
         container(row![
             left,
-            column![
+            stack![
+                right,
                 row![
                     dark_btn,
                     container(button("fullscreen").on_press(Message::ToggleFullscreen))
                         .width(Length::Fill)
                         .align_x(Alignment::End)
                 ],
-                right,
             ]
             .width(Length::Fixed(sw))
             .height(Length::Fixed(sh)),
@@ -845,6 +847,9 @@ impl Default for Application {
                 ))),
             ],
             page0_right: vec![
+                AppWidget::Media(MediaWidget {
+                    style: MediaStyle::MediaHalf(MediaWidgetHalf::default()),
+                }),
                 AppWidget::Calendar(CalendarWidget::new(CalendarStyle::MonthHalf(
                     MonthCalendarHalf::default(),
                 ))),
@@ -858,9 +863,6 @@ impl Default for Application {
                 AppWidget::Weather(WeatherWidget::new(WeatherStyle::DailyHalf(
                     DailyForecastHalf::default(),
                 ))),
-                AppWidget::Media(MediaWidget {
-                    style: MediaStyle::MediaHalf(MediaWidgetHalf::default()),
-                }),
             ],
             page1_widgets: vec![
                 AppWidget::Media(MediaWidget {
@@ -1517,8 +1519,8 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
         let palette = theme.palette();
 
         let layer = widget.cache.draw(renderer, bounds.size(), |frame| {
-            let w = frame.width();
-            let h = frame.height() * 0.9;
+            let w = frame.width() * 0.9;
+            let h = frame.height();
 
             let first_day_of_month = weekday_to_number(
                 &NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
@@ -1544,7 +1546,7 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
 
             let cell_h = cell_w;
             let font_size = cell_w * 0.38;
-            let month_font_size = cell_w * 0.7;
+            let month_font_size = cell_w * 0.6;
 
             let grid_w = cell_w * columns as f32;
             let total_h = month_font_size + cell_h * (1.0 + num_rows as f32);
@@ -1552,17 +1554,17 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
             let offset_y = (h - total_h) * 0.5;
 
             frame.fill_text(canvas::Text {
-                content: format!(" {}", now.format("%B")),
+                content: format!("   {}", now.format("%B")).to_uppercase(),
                 position: Point::new(offset_x, offset_y + month_font_size * 0.5),
                 size: month_font_size.into(),
                 color: color!(255, 0, 0),
-                font: SF_PRO_ROUNDED_BLACK,
+                font: SF_PRO_DISPLAY_BLACK,
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Center,
                 ..canvas::Text::default()
             });
 
-            let weekdays = ["mo", "tu", "we", "th", "fr", "sa", "su"];
+            let weekdays = ["M", "T", "W", "T", "F", "S", "S"];
 
             for (col, label) in weekdays.iter().enumerate() {
                 let x = offset_x + col as f32 * cell_w + cell_w * 0.5;
@@ -1577,7 +1579,7 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
                     } else {
                         palette.text
                     },
-                    font: SF_PRO_ROUNDED_BLACK,
+                    font: SF_PRO_DISPLAY_BLACK,
                     align_x: text::Alignment::Center,
                     align_y: alignment::Vertical::Center,
                     ..canvas::Text::default()
@@ -1612,7 +1614,7 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
                     } else {
                         palette.text
                     },
-                    font: SF_PRO_ROUNDED_BLACK,
+                    font: SF_PRO_DISPLAY_BLACK,
                     align_x: text::Alignment::Center,
                     align_y: alignment::Vertical::Center,
                     ..canvas::Text::default()
@@ -1688,7 +1690,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
 
                 frame.fill_text(canvas::Text {
                     content: format!("{}", time.day()),
-                    size: Pixels(size * 0.7),
+                    size: Pixels(size * 0.8),
                     position: Point::new(center.x, center.y + size * 0.05),
                     color: palette.text,
                     align_y: alignment::Vertical::Center,
@@ -3185,7 +3187,7 @@ impl MinimalForecastHalf {
         weather: &'a WeatherStatus,
         size: Size,
     ) -> Element<'a, Message> {
-        let w = size.width / 2.0;
+        let w = size.width;
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
 
@@ -3268,7 +3270,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                         size: Pixels(w.min(h) * 0.1),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y - 380.0 * scale.min(h / 1080.0),
+                            frame.center().y - 330.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3278,8 +3280,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
 
                     frame.fill_text(canvas::Text {
                         content: format!("{:.0}°", current.temperature_2m),
-                        size: Pixels(w.min(h) * 0.33),
-                        position: Point::new(w * 0.05, frame.center().y),
+                        size: Pixels(w.min(h) * 0.37),
+                        position: Point::new(w * 0.05, frame.center().y + 50.0 * scale.min(h / 1080.0)),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
                         font: SF_PRO_DISPLAY_BLACK,
@@ -3291,7 +3293,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y + 300.0 * scale.min(h / 1080.0),
+                            frame.center().y + 340.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3307,7 +3309,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y + 390.0 * scale.min(h / 1080.0),
+                            frame.center().y + 420.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3358,13 +3360,13 @@ impl DetailedForecastHalf {
         weather: &'a WeatherStatus,
         size: Size,
     ) -> Element<'a, Message> {
-        let w = size.width / 2.0;
+        let w = size.width;
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
 
         let icon_size = 80.0 * scale;
         let icon_x = w * 0.83;
-        let icon_y = h / 2.0 - 380.0 * scale - icon_size - 20.0 * scale;
+        let icon_y = h / 2.0 - 330.0 * scale - icon_size - 20.0 * scale;
 
         let icon = match weather {
             WeatherStatus::Ok(w_data) => {
@@ -3439,7 +3441,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.1),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y - 380.0 * scale.min(h / 1080.0),
+                            frame.center().y - 330.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3452,7 +3454,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.2),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y - 180.0 * scale.min(h / 1080.0),
+                            frame.center().y - 130.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3465,7 +3467,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y - 300.0 * scale.min(h / 1080.0),
+                            frame.center().y - 250.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3479,7 +3481,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y - 200.0 * scale.min(h / 1080.0),
+                            frame.center().y - 150.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.danger,
                         align_y: alignment::Vertical::Bottom,
@@ -3493,7 +3495,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y - 100.0 * scale.min(h / 1080.0),
+                            frame.center().y - 30.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3508,12 +3510,12 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             .enumerate()
                             .find(|(_, num)| **num >= 30.0)
                             .map_or("None for 7d".to_string(), |(i, &v)| {
-                                format!("{}% in {}d", v, i)
+                                format!("{} % in {}d", v, i)
                             }),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y - 100.0 * scale.min(h / 1080.0),
+                            frame.center().y - 30.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.danger,
                         align_y: alignment::Vertical::Bottom,
@@ -3527,7 +3529,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y + 50.0 * scale.min(h / 1080.0),
+                            frame.center().y + 130.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3540,7 +3542,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y + 50.0 * scale.min(h / 1080.0),
+                            frame.center().y + 130.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.danger,
                         align_y: alignment::Vertical::Bottom,
@@ -3554,7 +3556,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y + 200.0 * scale.min(h / 1080.0),
+                            frame.center().y + 280.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3567,7 +3569,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y + 200.0 * scale.min(h / 1080.0),
+                            frame.center().y + 280.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.danger,
                         align_y: alignment::Vertical::Bottom,
@@ -3581,7 +3583,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y + 350.0 * scale.min(h / 1080.0),
+                            frame.center().y + 430.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3594,7 +3596,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y + 350.0 * scale.min(h / 1080.0),
+                            frame.center().y + 430.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.danger,
                         align_y: alignment::Vertical::Bottom,
@@ -3653,13 +3655,13 @@ impl DailyForecastHalf {
             self.cache.clear();
         }
 
-        let w = size.width / 2.0;
+        let w = size.width;
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
 
         let icon_size = 80.0 * scale;
         let icon_x = w * 0.83;
-        let icon_y = h / 2.0 - 380.0 * scale - icon_size - 20.0 * scale;
+        let icon_y = h / 2.0 - 330.0 * scale - icon_size - 20.0 * scale;
 
         let (icon, daily_icons): (Element<Message>, Vec<Element<Message>>) = match weather {
             WeatherStatus::Ok(w_data) => {
@@ -3720,7 +3722,7 @@ impl DailyForecastHalf {
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(daily_column)
-                .padding(padding::top(h / 2.0 - 180.0 * scale - 20.0 * scale).left(w * 0.3))
+                .padding(padding::top(h / 2.0 - 130.0 * scale).left(w * 0.3))
                 .width(Length::Fill)
                 .height(Length::Fill)
         ]
@@ -3751,7 +3753,7 @@ impl<'a> canvas::Program<Message>
         let weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         let today = weekday_to_number(&time.weekday());
 
-        let mut curr_padding = -100.0;
+        let mut curr_padding = -50.0;
         let mut counter = 1;
 
         let static_layer = match weather {
@@ -3771,7 +3773,7 @@ impl<'a> canvas::Program<Message>
                         size: Pixels(w.min(h) * 0.1),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y - 380.0 * scale.min(h / 1080.0),
+                            frame.center().y - 330.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3784,7 +3786,7 @@ impl<'a> canvas::Program<Message>
                         size: Pixels(w.min(h) * 0.2),
                         position: Point::new(
                             w * 0.05,
-                            frame.center().y - 180.0 * scale.min(h / 1080.0),
+                            frame.center().y - 130.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3797,7 +3799,7 @@ impl<'a> canvas::Program<Message>
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y - 300.0 * scale.min(h / 1080.0),
+                            frame.center().y - 250.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.text,
                         align_y: alignment::Vertical::Bottom,
@@ -3811,7 +3813,7 @@ impl<'a> canvas::Program<Message>
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
-                            frame.center().y - 200.0 * scale.min(h / 1080.0),
+                            frame.center().y - 150.0 * scale.min(h / 1080.0),
                         ),
                         color: palette.danger,
                         align_y: alignment::Vertical::Bottom,
@@ -4052,7 +4054,7 @@ impl MediaWidgetHalf {
         let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
             button(
                 svg(handle)
-                    .style(move |theme: &Theme, _status| svg::Style {
+                    .style(move |_theme: &Theme, _status| svg::Style {
                         color: Some(palette.primary),
                         ..Default::default()
                     })
@@ -4124,7 +4126,7 @@ impl MediaWidgetHalf {
                     0.0..=100.0,
                     position as f32 / (duration as f32 / 100.0),
                 )
-                .style(move |theme: &Theme| iced::widget::progress_bar::Style {
+                .style(move |_theme: &Theme| iced::widget::progress_bar::Style {
                     background: iced::Background::Color(palette.danger),
                     bar: iced::Background::Color(palette.primary),
                     border: iced::Border {
@@ -4141,15 +4143,21 @@ impl MediaWidgetHalf {
                 .width(Length::Fixed(s * 0.8))
                 .align_x(iced::Alignment::Center),
         ]
-        .spacing(s * 0.06)
+        .spacing(s * 0.04)
         .align_x(iced::Alignment::Start);
 
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(iced::Alignment::Center)
-            .align_y(iced::Alignment::Center)
-            .into()
+        container(
+            container(content)
+                .width(Length::Fixed(s))
+                .height(Length::Fixed(s))
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center)
+        .into()
     }
 }
 
@@ -4206,7 +4214,7 @@ impl MediaWidgetFull {
         let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
             button(
                 svg(handle)
-                    .style(move |theme: &Theme, _status| svg::Style {
+                    .style(move |_theme: &Theme, _status| svg::Style {
                         color: Some(palette.primary),
                         ..Default::default()
                     })
@@ -4282,7 +4290,7 @@ impl MediaWidgetFull {
                         0.0..=100.0,
                         position as f32 / (duration as f32 / 100.0),
                     )
-                    .style(move |theme: &Theme| {
+                    .style(move |_theme: &Theme| {
                         iced::widget::progress_bar::Style {
                             background: iced::Background::Color(palette.danger),
                             bar: iced::Background::Color(palette.primary),
