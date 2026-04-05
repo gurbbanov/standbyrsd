@@ -416,31 +416,70 @@ impl Application {
                 }
 
                 self.metadata_updating = true;
-                let session = match self.playerctl.as_ref().unwrap().GetCurrentSession().ok() {
-                    Some(s) => s,
+
+                let session = match self.session.as_ref() {
+                    Some(s) => s.clone(),
                     None => return Task::none(),
                 };
 
                 let existing = self.media_metadata.clone();
 
-                Task::perform(
-                    async move {
-                        let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
-                        let timeline = session.GetTimelineProperties().ok()?;
-                        let playback = session.GetPlaybackInfo().ok()?;
+                let (tx, rx) = tokio::sync::oneshot::channel();
 
-                        Some(MediaMetadata {
-                            title: info.Title().ok()?.to_string(),
-                            artist: info.Artist().ok()?.to_string(),
-                            position: timeline.Position().ok()?.Duration,
-                            duration: timeline.EndTime().ok()?.Duration,
-                            is_playing: matches!(
-                                playback.PlaybackStatus().ok()?,
-                                windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
-                            ),
-                            ..existing?
-                        })
-                    },
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+
+                    rt.block_on(async move {
+                        let result: Option<MediaMetadata> = async {
+                            let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
+                            let timeline = session.GetTimelineProperties().ok()?;
+                            let playback = session.GetPlaybackInfo().ok()?;
+
+                            let title = info.Title().ok()?.to_string();
+                            let artist = info.Artist().ok()?.to_string();
+
+                            let track_changed = existing.as_ref()
+                                .map(|e| e.title != title || e.artist != artist)
+                                .unwrap_or(true);
+
+                            let (thumbnail, gradient_colors) = if track_changed {
+                                let thumb = async {
+                                    let stream = info.Thumbnail().ok()?.OpenReadAsync().ok()?.await.ok()?;
+                                    let size = stream.Size().ok()? as u32;
+                                    let reader = windows::Storage::Streams::DataReader::CreateDataReader(&stream).ok()?;
+                                    reader.LoadAsync(size).ok()?.await.ok()?;
+                                    let mut buf = vec![0u8; size as usize];
+                                    reader.ReadBytes(&mut buf).ok()?;
+                                    Some(buf)
+                                }.await;
+
+                                let gradient_colors = thumb.as_ref().map(|b| extract_dominant_colors(b));
+                                let thumbnail = thumb.map(iced::widget::image::Handle::from_bytes);
+
+                                (thumbnail, gradient_colors)
+                            } else {
+                                let e = existing.as_ref()?;
+                                (e.thumbnail.clone(), e.gradient_colors)
+                            };
+
+                            Some(MediaMetadata {
+                                title,
+                                artist,
+                                position: timeline.Position().ok()?.Duration,
+                                duration: timeline.EndTime().ok()?.Duration,
+                                is_playing: matches!(
+                                    playback.PlaybackStatus().ok()?,
+                                    windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
+                                ),
+                                thumbnail,
+                                gradient_colors,
+                            })
+                        }.await;
+                        let _ = tx.send(result);
+                    });
+                });
+                Task::perform(
+                    async move { rx.await.ok().flatten() },
                     Message::MetadataSave,
                 )
             }
@@ -685,7 +724,7 @@ impl Application {
                             }
                             tokio::time::sleep(Duration::from_millis(300)).await;
                         },
-                        |_| Message::GetPlayer,
+                        |_| Message::UpdateMetadata,
                     )
                 }
 
@@ -1665,7 +1704,7 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
         let palette = theme.palette();
 
         let layer = widget.cache.draw(renderer, bounds.size(), |frame| {
-            let w = frame.width() * 0.9;
+            let w = frame.width() * 0.95;
             let h = frame.height();
 
             let first_day_of_month = weekday_to_number(
@@ -1697,7 +1736,7 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
             let grid_w = cell_w * columns as f32;
             let total_h = month_font_size + cell_h * (1.0 + num_rows as f32);
             let offset_x = (w - grid_w) * 0.5;
-            let offset_y = (h - total_h) * 0.5;
+            let offset_y = (h - total_h) * 0.6;
 
             frame.fill_text(canvas::Text {
                 content: format!("   {}", now.format("%B")).to_uppercase(),
