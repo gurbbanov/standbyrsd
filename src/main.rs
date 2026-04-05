@@ -307,8 +307,11 @@ impl Application {
                                 reader.LoadAsync(size).ok()?.await.ok()?;
                                 let mut buf = vec![0u8; size as usize];
                                 reader.ReadBytes(&mut buf).ok()?;
-                                Some(iced::widget::image::Handle::from_bytes(buf))
+                                Some(buf)
                             }.await;
+
+                            let gradient_colors = thumbnail.as_ref().map(|buf| extract_dominant_colors(buf));
+                            let thumbnail = thumbnail.map(|buf| iced::widget::image::Handle::from_bytes(buf));
 
                             Some(MediaMetadata {
                                 title: info.Title().ok()?.to_string(),
@@ -320,6 +323,7 @@ impl Application {
                                     windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
                                 ),
                                 thumbnail,
+                                gradient_colors
                             })
                         }.await;
 
@@ -4173,23 +4177,26 @@ impl MediaWidgetFull {
         theme: &'a Theme,
         size: Size,
     ) -> Element<'a, Message> {
-        let s = size.width.min(size.height);
+        let s = size.height.min(size.width / 2.0);
         let palette = theme.palette();
 
         let thumbnail =
             if let Some(handle) = media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref()) {
                 container(
                     iced::widget::image(handle.clone())
-                        .width(Length::Fill)
-                        .height(Length::Fill)
+                        .width(Length::Fixed(s))
+                        .height(Length::Fixed(s))
                         .content_fit(iced::ContentFit::Cover),
                 )
-                .width(Length::Fixed(s * 0.9))
-                .height(Length::Fixed(s * 0.9))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
             } else {
                 container(text(""))
                     .width(Length::Fill)
                     .height(Length::Fill)
+                    .align_x(iced::Alignment::Center)
                     .style(move |_| container::Style {
                         background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
                         border: iced::Border {
@@ -4218,8 +4225,8 @@ impl MediaWidgetFull {
                         color: Some(palette.primary),
                         ..Default::default()
                     })
-                    .width(Length::Fixed(s * 0.17))
-                    .height(Length::Fixed(s * 0.17)),
+                    .width(Length::Fixed(s * 0.18))
+                    .height(Length::Fixed(s * 0.18)),
             )
             .on_press(msg)
             .style(|_, _| button::Style {
@@ -4271,16 +4278,16 @@ impl MediaWidgetFull {
         let content = column![
             column![
                 text(title)
-                    .size(s * 0.07)
+                    .size(s * 0.09)
                     .font(SF_PRO_DISPLAY_BOLD)
                     .color(palette.primary),
                 text(artist)
-                    .size(s * 0.06)
+                    .size(s * 0.05)
                     .font(SF_PRO_DISPLAY_BOLD)
                     .color(palette.danger),
             ]
             .align_x(iced::Alignment::Center)
-            .spacing(s * 0.01),
+            .spacing(s * 0.008),
             container(controls)
                 .width(Length::Fixed(s * 0.8))
                 .align_x(iced::Alignment::Center),
@@ -4310,20 +4317,57 @@ impl MediaWidgetFull {
         .spacing(s * 0.17)
         .align_x(iced::Alignment::Center);
 
-        row![
-            container(thumbnail)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(s * 0.1)
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center),
-            container(content)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center),
+        let (gc1, gc2) = media_metadata
+            .as_ref()
+            .and_then(|m| m.gradient_colors)
+            .unwrap_or((Color::BLACK, Color::from_rgb(0.1, 0.1, 0.1)));
+
+        let w = size.width;
+        let h = size.height;
+        let r = size.width.min(size.height) * 0.15;
+
+        let svg_data = format!(
+            r#"<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg">
+        <path d="M0 {h1} Q0 {h} {r} {h} L0 {h} Z" fill="black"/>
+        <path d="M{w1} {h} Q{w} {h} {w} {h1} L{w} {h} Z" fill="black"/>
+        <path d="M{r} 0 Q0 0 0 {r} L0 0 Z" fill="black"/>
+        <path d="M{w} {r} Q{w} 0 {w1} 0 L{w} 0 Z" fill="black"/>
+        </svg>"#,
+            w = w,
+            h = h,
+            h1 = h - r,
+            w1 = w - r,
+            r = r,
+        );
+        let corners = svg(svg::Handle::from_memory(svg_data.into_bytes()))
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        stack![
+            container(row![
+                container(thumbnail)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(s * 0.1)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Center),
+                container(content)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Center),
+            ])
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Gradient(iced::Gradient::Linear(
+                    iced::gradient::Linear::new(std::f32::consts::PI * 0.75)
+                        .add_stop(0.0, gc1)
+                        .add_stop(1.0, gc2),
+                ))),
+                ..Default::default()
+            }),
+            corners
         ]
-        .height(Length::Fill)
         .into()
     }
 }
@@ -4336,6 +4380,7 @@ struct MediaMetadata {
     duration: i64,
     is_playing: bool,
     thumbnail: Option<iced::widget::image::Handle>,
+    gradient_colors: Option<(Color, Color)>,
 }
 
 pub fn weekday_to_number(weekday: &Weekday) -> usize {
@@ -4420,4 +4465,68 @@ fn lat_lon_to_xy(lat: f64, lon: f64, width: f32, height: f32) -> Point {
     let y = (1.0 - merc / std::f64::consts::PI) / 2.0 * height as f64;
 
     Point::new(x as f32, y as f32)
+}
+
+fn extract_dominant_colors(buf: &[u8]) -> (Color, Color) {
+    let img = image::load_from_memory(buf).unwrap().to_rgb8();
+
+    let pixels: Vec<[f32; 3]> = img
+        .pixels()
+        .step_by(10)
+        .map(|p| {
+            [
+                p[0] as f32 / 255.0,
+                p[1] as f32 / 255.0,
+                p[2] as f32 / 255.0,
+            ]
+        })
+        .collect();
+
+    let mut c1 = pixels[0];
+    let mut c2 = pixels[pixels.len() - 1];
+
+    for _ in 0..20 {
+        let mut sum1 = [0.0f32; 3];
+        let mut sum2 = [0.0f32; 3];
+        let mut count1 = 0usize;
+        let mut count2 = 0usize;
+
+        for p in &pixels {
+            let d1 = dist(p, &c1);
+            let d2 = dist(p, &c2);
+            if d1 < d2 {
+                sum1[0] += p[0];
+                sum1[1] += p[1];
+                sum1[2] += p[2];
+                count1 += 1;
+            } else {
+                sum2[0] += p[0];
+                sum2[1] += p[1];
+                sum2[2] += p[2];
+                count2 += 1;
+            }
+        }
+
+        if count1 > 0 {
+            c1 = [
+                sum1[0] / count1 as f32,
+                sum1[1] / count1 as f32,
+                sum1[2] / count1 as f32,
+            ];
+        }
+        if count2 > 0 {
+            c2 = [
+                sum2[0] / count2 as f32,
+                sum2[1] / count2 as f32,
+                sum2[2] / count2 as f32,
+            ];
+        }
+    }
+
+    let darken = |c: [f32; 3]| Color::from_rgb(c[0] * 0.5, c[1] * 0.5, c[2] * 0.5);
+    (darken(c1), darken(c2))
+}
+
+fn dist(a: &[f32; 3], b: &[f32; 3]) -> f32 {
+    (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)
 }
