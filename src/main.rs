@@ -118,6 +118,8 @@ struct Application {
     page0_left: Vec<AppWidget>,
     page0_right: Vec<AppWidget>,
     page1_widgets: Vec<AppWidget>,
+    gradient_c1: Animated<Color>,
+    gradient_c2: Animated<Color>,
     theme: Animated<Theme>,
     fullscreen: bool,
     #[cfg(target_os = "windows")]
@@ -140,6 +142,8 @@ enum Message {
     OpenMainWindow,
     WindowOpened(Id),
     ToggleTheme,
+    AnimateGradientC1(iced_anim::Event<Color>),
+    AnimateGradientC2(iced_anim::Event<Color>),
     AnimateTheme(iced_anim::Event<Theme>),
     ToggleFullscreen,
     DragDelta(f32),
@@ -300,7 +304,7 @@ impl Application {
                             let timeline = session.GetTimelineProperties().ok()?;
                             let playback = session.GetPlaybackInfo().ok()?;
 
-                            let thumbnail = async {
+                            let thumbnail_buf = async {
                                 let stream = info.Thumbnail().ok()?.OpenReadAsync().ok()?.await.ok()?;
                                 let size = stream.Size().ok()? as u32;
                                 let reader = windows::Storage::Streams::DataReader::CreateDataReader(&stream).ok()?;
@@ -310,8 +314,8 @@ impl Application {
                                 Some(buf)
                             }.await;
 
-                            let gradient_colors = thumbnail.as_ref().map(|buf| extract_dominant_colors(buf));
-                            let thumbnail = thumbnail.map(|buf| iced::widget::image::Handle::from_bytes(buf));
+                            let gradient_colors = thumbnail_buf.as_ref().map(|buf| extract_dominant_colors(buf));
+                            let thumbnail = thumbnail_buf.map(|buf| iced::widget::image::Handle::from_bytes(buf));
 
                             Some(MediaMetadata {
                                 title: info.Title().ok()?.to_string(),
@@ -344,12 +348,18 @@ impl Application {
                         let finder = mpris::PlayerFinder::new().ok()?;
                         let player = finder.find_active().ok()?;
                         let metadata = player.get_metadata().ok()?;
+
                         let playback = player.get_playback_status().ok()?;
                         let position = player
                             .get_position()
                             .ok()
-                            .map(|p| p.as_micros() as i64)
+                            .map(|p| p.as_micros() as i64 * 10)
                             .unwrap_or(0);
+                        let duration = metadata
+                            .length()
+                            .map(|d| d.as_micros() as i64 * 10)
+                            .unwrap_or(0);
+                        let is_playing = matches!(playback, mpris::PlaybackStatus::Playing);
 
                         let title = metadata.title().unwrap_or("").to_string();
                         let artist = metadata
@@ -357,10 +367,8 @@ impl Application {
                             .and_then(|a| a.first().cloned())
                             .unwrap_or("")
                             .to_string();
-                        let duration = metadata.length().map(|d| d.as_micros() as i64).unwrap_or(0);
-                        let is_playing = matches!(playback, mpris::PlaybackStatus::Playing);
 
-                        let thumbnail = metadata
+                        let thumbnail_buf = metadata
                             .get("mpris:artUrl")
                             .and_then(|v| v.as_str())
                             .and_then(|url| {
@@ -376,13 +384,20 @@ impl Application {
                                 }
                             });
 
+                        let gradient_colors = thumbnail_buf
+                            .as_ref()
+                            .map(|buf| extract_dominant_colors(buf));
+                        let thumbnail =
+                            thumbnail_buf.map(|buf| iced::widget::image::Handle::from_bytes(buf));
+
                         Some(MediaMetadata {
                             title,
                             artist,
                             position,
                             duration,
                             is_playing,
-                            thumbnail: thumbnail.map(iced::widget::image::Handle::from_bytes),
+                            thumbnail,
+                            gradient_colors,
                         })
                     })();
 
@@ -406,14 +421,13 @@ impl Application {
                     None => return Task::none(),
                 };
 
-                let metadata = self.media_metadata.clone();
+                let existing = self.media_metadata.clone();
 
                 Task::perform(
                     async move {
                         let info = session.TryGetMediaPropertiesAsync().ok()?.await.ok()?;
                         let timeline = session.GetTimelineProperties().ok()?;
                         let playback = session.GetPlaybackInfo().ok()?;
-                        let metadata = metadata?;
 
                         Some(MediaMetadata {
                             title: info.Title().ok()?.to_string(),
@@ -424,15 +438,111 @@ impl Application {
                                 playback.PlaybackStatus().ok()?,
                                 windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
                             ),
-                            ..metadata
+                            ..existing?
                         })
                     },
                     Message::MetadataSave,
                 )
             }
+            #[cfg(target_os = "linux")]
+            Message::UpdateMetadata => {
+                if self.metadata_updating {
+                    return Task::none();
+                }
+
+                self.metadata_updating = true;
+
+                let existing = self.media_metadata.clone();
+
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result: Option<MediaMetadata> = (|| {
+                        let finder = mpris::PlayerFinder::new().ok()?;
+                        let player = finder.find_active().ok()?;
+                        let metadata = player.get_metadata().ok()?;
+
+                        let playback = player.get_playback_status().ok()?;
+                        let position = player
+                            .get_position()
+                            .ok()
+                            .map(|p| p.as_micros() as i64 * 10)
+                            .unwrap_or(0);
+                        let duration = metadata
+                            .length()
+                            .map(|d| d.as_micros() as i64 * 10)
+                            .unwrap_or(0);
+                        let is_playing = matches!(playback, mpris::PlaybackStatus::Playing);
+
+                        let title = metadata.title().unwrap_or("").to_string();
+                        let artist = metadata
+                            .artists()
+                            .and_then(|a| a.first().cloned())
+                            .unwrap_or("")
+                            .to_string();
+
+                        let title_changed =
+                            existing.as_ref().map(|m| m.title.as_str()) != Some(title.as_str());
+
+                        if title_changed {
+                            let thumbnail_buf = metadata
+                                .get("mpris:artUrl")
+                                .and_then(|v| v.as_str())
+                                .and_then(|url| {
+                                    if url.starts_with("file://") {
+                                        std::fs::read(url.trim_start_matches("file://")).ok()
+                                    } else if url.starts_with("http") {
+                                        reqwest::blocking::get(url)
+                                            .ok()
+                                            .and_then(|r| r.bytes().ok())
+                                            .map(|b| b.to_vec())
+                                    } else {
+                                        None
+                                    }
+                                });
+
+                            let gradient_colors = thumbnail_buf
+                                .as_ref()
+                                .map(|buf| extract_dominant_colors(buf));
+                            let thumbnail = thumbnail_buf
+                                .map(|buf| iced::widget::image::Handle::from_bytes(buf));
+
+                            return Some(MediaMetadata {
+                                title,
+                                artist,
+                                position,
+                                duration,
+                                is_playing,
+                                thumbnail,
+                                gradient_colors,
+                            });
+                        } else {
+                            Some(MediaMetadata {
+                                title,
+                                artist,
+                                position,
+                                duration,
+                                is_playing,
+                                ..existing?
+                            })
+                        }
+                    })();
+
+                    let _ = tx.send(result);
+                });
+
+                Task::perform(
+                    async move { rx.await.ok().flatten() },
+                    Message::MetadataSave,
+                )
+            }
             Message::MetadataSave(metadata) => {
                 self.metadata_updating = false;
-
+                if let Some(ref m) = metadata {
+                    if let Some((c1, c2)) = m.gradient_colors {
+                        self.gradient_c1.set_target(c1);
+                        self.gradient_c2.set_target(c2);
+                    }
+                }
                 self.media_metadata = metadata;
 
                 Task::none()
@@ -465,6 +575,14 @@ impl Application {
                     )));
                 }
 
+                Task::none()
+            }
+            Message::AnimateGradientC1(event) => {
+                self.gradient_c1.update(event);
+                Task::none()
+            }
+            Message::AnimateGradientC2(event) => {
+                self.gradient_c2.update(event);
                 Task::none()
             }
             Message::AnimateTheme(event) => {
@@ -584,7 +702,7 @@ impl Application {
                         .ok()
                         .flatten()
                     },
-                    |_| Message::GetPlayer,
+                    |_| Message::UpdateMetadata,
                 )
             }
             Message::Pause => {
@@ -598,7 +716,7 @@ impl Application {
                             }
                             tokio::time::sleep(Duration::from_millis(300)).await;
                         },
-                        |_| Message::GetPlayer,
+                        |_| Message::UpdateMetadata,
                     )
                 }
 
@@ -615,7 +733,7 @@ impl Application {
                         .ok()
                         .flatten()
                     },
-                    |_| Message::GetPlayer,
+                    |_| Message::UpdateMetadata,
                 )
             }
             Message::NextTrack => {
@@ -629,7 +747,7 @@ impl Application {
                             }
                             tokio::time::sleep(Duration::from_millis(300)).await;
                         },
-                        |_| Message::GetPlayer,
+                        |_| Message::UpdateMetadata,
                     )
                 }
 
@@ -646,7 +764,7 @@ impl Application {
                         .ok()
                         .flatten()
                     },
-                    |_| Message::GetPlayer,
+                    |_| Message::UpdateMetadata,
                 )
             }
             Message::PreviousTrack => {
@@ -660,7 +778,7 @@ impl Application {
                             }
                             tokio::time::sleep(Duration::from_millis(300)).await;
                         },
-                        |_| Message::GetPlayer,
+                        |_| Message::UpdateMetadata,
                     )
                 }
 
@@ -677,7 +795,7 @@ impl Application {
                         .ok()
                         .flatten()
                     },
-                    |_| Message::GetPlayer,
+                    |_| Message::UpdateMetadata,
                 )
             }
             Message::None => Task::none(),
@@ -705,38 +823,46 @@ impl Application {
         match self.main_window {
             Some(_id) => Animation::new(
                 &self.theme,
-                responsive(move |size| {
-                    let total_offset: f32 = match &self.drag {
-                        DragState::Idle => -(self.current_page as f32) * size.width,
-                        DragState::Active { offset_px, .. } => {
-                            -(self.current_page as f32) * size.width + offset_px
-                        }
-                        DragState::Snapping {
-                            start_offset,
-                            end_offset,
-                            velocity,
-                            started_at,
-                        } => {
-                            let elapsed = started_at.elapsed().as_secs_f32();
-                            let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
-                            let dist = end_offset - start_offset;
-                            let v0 = if dist.abs() > 0.001 {
-                                velocity / dist
-                            } else {
-                                0.0
+                Animation::new(
+                    &self.gradient_c1,
+                    Animation::new(
+                        &self.gradient_c2,
+                        responsive(move |size| {
+                            let total_offset: f32 = match &self.drag {
+                                DragState::Idle => -(self.current_page as f32) * size.width,
+                                DragState::Active { offset_px, .. } => {
+                                    -(self.current_page as f32) * size.width + offset_px
+                                }
+                                DragState::Snapping {
+                                    start_offset,
+                                    end_offset,
+                                    velocity,
+                                    started_at,
+                                } => {
+                                    let elapsed = started_at.elapsed().as_secs_f32();
+                                    let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
+                                    let dist = end_offset - start_offset;
+                                    let v0 = if dist.abs() > 0.001 {
+                                        velocity / dist
+                                    } else {
+                                        0.0
+                                    };
+                                    start_offset + dist * ease_spring(t, v0)
+                                }
                             };
-                            start_offset + dist * ease_spring(t, v0)
-                        }
-                    };
 
-                    slide_pages(
-                        total_offset,
-                        size.width,
-                        size.height,
-                        self.page0(size),
-                        self.page1(size),
+                            slide_pages(
+                                total_offset,
+                                size.width,
+                                size.height,
+                                self.page0(size),
+                                self.page1(size),
+                            )
+                        }),
                     )
-                }),
+                    .on_update(Message::AnimateGradientC2),
+                )
+                .on_update(Message::AnimateGradientC1),
             )
             .on_update(Message::AnimateTheme)
             .into(),
@@ -760,6 +886,8 @@ impl Application {
                     &self.theme.value(),
                     &self.media_metadata,
                     slot_size,
+                    *self.gradient_c1.value(),
+                    *self.gradient_c2.value(),
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -777,6 +905,8 @@ impl Application {
                     &self.theme.value(),
                     &self.media_metadata,
                     slot_size,
+                    *self.gradient_c1.value(),
+                    *self.gradient_c2.value(),
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -820,6 +950,8 @@ impl Application {
                     &self.theme.value(),
                     &self.media_metadata,
                     size,
+                    *self.gradient_c1.value(),
+                    *self.gradient_c2.value(),
                 ))
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
@@ -879,6 +1011,14 @@ impl Default for Application {
                     AnalogueRectClockFull::default(),
                 ))),
             ],
+            gradient_c1: Animated::new(
+                Color::BLACK,
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
+            gradient_c2: Animated::new(
+                Color::BLACK,
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
             theme: Animated::new(
                 Theme::custom(
                     "classic".to_string(),
@@ -1422,12 +1562,14 @@ impl AppWidget {
         theme: &'a Theme,
         media_metadata: &'a Option<MediaMetadata>,
         size: Size,
+        gc1: Color,
+        gc2: Color,
     ) -> Element<'a, Message> {
         match self {
             AppWidget::Clock(w) => w.view(time, weather, theme, size),
             AppWidget::Calendar(w) => w.view(time),
             AppWidget::Weather(w) => w.view(theme, time, weather, size),
-            AppWidget::Media(w) => w.view(media_metadata, theme, size),
+            AppWidget::Media(w) => w.view(media_metadata, theme, size, gc1, gc2),
         }
     }
 
@@ -3964,8 +4106,10 @@ impl MediaWidget {
         media_metadata: &'a Option<MediaMetadata>,
         theme: &'a Theme,
         size: Size,
+        gc1: Color,
+        gc2: Color,
     ) -> Element<'a, Message> {
-        self.style.view(media_metadata, theme, size)
+        self.style.view(media_metadata, theme, size, gc1, gc2)
     }
 }
 
@@ -3986,10 +4130,12 @@ impl MediaStyle {
         media_metadata: &'a Option<MediaMetadata>,
         theme: &'a Theme,
         size: Size,
+        gc1: Color,
+        gc2: Color,
     ) -> Element<'a, Message> {
         match self {
             MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size),
-            MediaStyle::MediaFull(m) => m.view(media_metadata, theme, size),
+            MediaStyle::MediaFull(m) => m.view(media_metadata, theme, size, gc1, gc2),
             _ => unimplemented!(),
         }
     }
@@ -4176,6 +4322,8 @@ impl MediaWidgetFull {
         media_metadata: &'a Option<MediaMetadata>,
         theme: &'a Theme,
         size: Size,
+        gc1: Color,
+        gc2: Color,
     ) -> Element<'a, Message> {
         let s = size.height.min(size.width / 2.0);
         let palette = theme.palette();
@@ -4186,7 +4334,7 @@ impl MediaWidgetFull {
                     iced::widget::image(handle.clone())
                         .width(Length::Fixed(s))
                         .height(Length::Fixed(s))
-                        .content_fit(iced::ContentFit::Cover),
+                        .content_fit(iced::ContentFit::Contain),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -4316,11 +4464,6 @@ impl MediaWidgetFull {
         ]
         .spacing(s * 0.17)
         .align_x(iced::Alignment::Center);
-
-        let (gc1, gc2) = media_metadata
-            .as_ref()
-            .and_then(|m| m.gradient_colors)
-            .unwrap_or((Color::BLACK, Color::from_rgb(0.1, 0.1, 0.1)));
 
         let w = size.width;
         let h = size.height;
@@ -4523,7 +4666,15 @@ fn extract_dominant_colors(buf: &[u8]) -> (Color, Color) {
         }
     }
 
-    let darken = |c: [f32; 3]| Color::from_rgb(c[0] * 0.5, c[1] * 0.5, c[2] * 0.5);
+    let darken = |c: [f32; 3]| {
+        let min = 0.15f32;
+        Color::from_rgb(
+            (c[0] * 0.6).max(min),
+            (c[1] * 0.6).max(min),
+            (c[2] * 0.6).max(min),
+        )
+    };
+
     (darken(c1), darken(c2))
 }
 
