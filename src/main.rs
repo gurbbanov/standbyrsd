@@ -344,6 +344,7 @@ impl Application {
             }
             #[cfg(target_os = "linux")]
             Message::PlayerInit => {
+                let theme_name = self.theme.value().name().to_string();
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 std::thread::spawn(move || {
                     let result: Option<MediaMetadata> = (|| {
@@ -388,7 +389,7 @@ impl Application {
 
                         let gradient_colors = thumbnail_buf
                             .as_ref()
-                            .map(|buf| extract_dominant_colors(buf));
+                            .map(|buf| extract_dominant_colors(buf, &theme_name));
                         let thumbnail =
                             thumbnail_buf.map(|buf| iced::widget::image::Handle::from_bytes(buf));
 
@@ -504,6 +505,7 @@ impl Application {
                 self.metadata_updating = true;
 
                 let existing = self.media_metadata.clone();
+                let theme_name = self.theme.value().name().to_string();
 
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 std::thread::spawn(move || {
@@ -553,7 +555,7 @@ impl Application {
 
                             let gradient_colors = thumbnail_buf
                                 .as_ref()
-                                .map(|buf| extract_dominant_colors(buf));
+                                .map(|buf| extract_dominant_colors(buf, &theme_name));
                             let thumbnail = thumbnail_buf
                                 .map(|buf| iced::widget::image::Handle::from_bytes(buf));
 
@@ -4245,6 +4247,7 @@ impl MediaWidgetHalf {
 
         let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
             match media_metadata {
+                #[cfg(target_os = "windows")]
                 Some(m) => (
                     m.title.clone(),
                     m.artist.clone(),
@@ -4263,6 +4266,16 @@ impl MediaWidgetHalf {
                     },
                     m.duration / 10000,
                 ),
+                #[cfg(target_os = "linux")]
+                Some(m) => (
+                    m.title.clone(),
+                    m.artist.clone(),
+                    m.is_playing,
+                    m.position / 10000000,
+                    m.duration / 10000000,
+                    m.position / 10000,
+                    m.duration / 10000,
+                ),
                 None => (
                     "Not playing".to_string(),
                     "—".to_string(),
@@ -4274,21 +4287,25 @@ impl MediaWidgetHalf {
                 ),
             };
 
-        let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
-            button(
-                svg(handle)
-                    .style(move |_theme: &Theme, _status| svg::Style {
-                        color: Some(palette.primary),
-                        ..Default::default()
-                    })
-                    .width(Length::Fixed(s * 0.12))
-                    .height(Length::Fixed(s * 0.12)),
+        let btn = |handle: svg::Handle, size: f32, msg: Message| -> Element<Message> {
+            container(
+                button(
+                    svg(handle)
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(palette.primary),
+                            ..Default::default()
+                        })
+                        .width(Length::Fixed(size))
+                        .height(Length::Fixed(size)),
+                )
+                .on_press(msg)
+                .style(|_, _| button::Style {
+                    background: None,
+                    ..Default::default()
+                }),
             )
-            .on_press(msg)
-            .style(|_, _| button::Style {
-                background: None,
-                ..Default::default()
-            })
+            .width(Length::Fixed(size))
+            .center_x(size)
             .into()
         };
 
@@ -4310,21 +4327,25 @@ impl MediaWidgetHalf {
         let controls = row![
             btn(
                 svg::Handle::from_memory(include_bytes!("../icons/previous.svg")),
+                s * 0.12,
                 Message::PreviousTrack
             ),
             if is_playing {
                 btn(
                     svg::Handle::from_memory(include_bytes!("../icons/pause.svg")),
+                    s * 0.12,
                     Message::Pause,
                 )
             } else {
                 btn(
                     svg::Handle::from_memory(include_bytes!("../icons/play.svg")),
+                    s * 0.12,
                     Message::Play,
                 )
             },
             btn(
                 svg::Handle::from_memory(include_bytes!("../icons/next.svg")),
+                s * 0.12,
                 Message::NextTrack
             ),
         ]
@@ -4431,6 +4452,7 @@ impl MediaWidgetFull {
 
         let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
             match media_metadata {
+                #[cfg(target_os = "windows")]
                 Some(m) => (
                     m.title.clone(),
                     m.artist.clone(),
@@ -4449,6 +4471,16 @@ impl MediaWidgetFull {
                     },
                     m.duration / 10000,
                 ),
+                #[cfg(target_os = "linux")]
+                Some(m) => (
+                    m.title.clone(),
+                    m.artist.clone(),
+                    m.is_playing,
+                    m.position / 10000000,
+                    m.duration / 10000000,
+                    m.position / 10000,
+                    m.duration / 10000,
+                ),
                 None => (
                     "Not playing".to_string(),
                     "—".to_string(),
@@ -4460,21 +4492,25 @@ impl MediaWidgetFull {
                 ),
             };
 
-        let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
-            button(
-                svg(handle)
-                    .style(move |_theme: &Theme, _status| svg::Style {
-                        color: Some(palette.primary),
-                        ..Default::default()
-                    })
-                    .width(Length::Fixed(s * 0.18))
-                    .height(Length::Fixed(s * 0.18)),
+        let btn = |handle: svg::Handle, size: f32, msg: Message| -> Element<Message> {
+            container(
+                button(
+                    svg(handle)
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(palette.primary),
+                            ..Default::default()
+                        })
+                        .width(Length::Fixed(size))
+                        .height(Length::Fixed(size)),
+                )
+                .on_press(msg)
+                .style(|_, _| button::Style {
+                    background: None,
+                    ..Default::default()
+                }),
             )
-            .on_press(msg)
-            .style(|_, _| button::Style {
-                background: None,
-                ..Default::default()
-            })
+            .width(Length::Fixed(size))
+            .center_x(size)
             .into()
         };
 
@@ -4496,25 +4532,29 @@ impl MediaWidgetFull {
         let controls = row![
             btn(
                 svg::Handle::from_memory(include_bytes!("../icons/previous.svg")),
+                s * 0.18,
                 Message::PreviousTrack
             ),
             if is_playing {
                 btn(
                     svg::Handle::from_memory(include_bytes!("../icons/pause.svg")),
+                    s * 0.18,
                     Message::Pause,
                 )
             } else {
                 btn(
                     svg::Handle::from_memory(include_bytes!("../icons/play.svg")),
+                    s * 0.18,
                     Message::Play,
                 )
             },
             btn(
                 svg::Handle::from_memory(include_bytes!("../icons/next.svg")),
+                s * 0.18,
                 Message::NextTrack
             ),
         ]
-        .spacing(s * 0.1)
+        .spacing(s * 0.12)
         .align_y(iced::Alignment::Center);
 
         let content = column![
@@ -4522,11 +4562,17 @@ impl MediaWidgetFull {
                 text(title)
                     .size(s * 0.09)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.primary),
+                    .color(palette.primary)
+                    .width(Length::Fixed(s * 0.8))
+                    .shaping(iced::widget::text::Shaping::Advanced)
+                    .wrapping(iced::widget::text::Wrapping::None),
                 text(artist)
                     .size(s * 0.05)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.danger),
+                    .color(palette.danger)
+                    .width(Length::Fixed(s * 0.8))
+                    .shaping(iced::widget::text::Shaping::Advanced)
+                    .wrapping(iced::widget::text::Wrapping::None),
             ]
             .align_x(iced::Alignment::Center)
             .spacing(s * 0.008),
@@ -4618,6 +4664,7 @@ struct MediaMetadata {
     is_playing: bool,
     thumbnail: Option<iced::widget::image::Handle>,
     gradient_colors: Option<(Color, Color)>,
+    #[cfg(target_os = "windows")]
     position_origin: DateTime<Local>,
 }
 
