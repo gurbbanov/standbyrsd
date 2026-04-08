@@ -293,6 +293,7 @@ impl Application {
                     None => return Task::none(),
                 };
 
+                let theme_name = self.theme.value().name().to_string();
                 let (tx, rx) = tokio::sync::oneshot::channel();
 
                 std::thread::spawn(move || {
@@ -314,7 +315,7 @@ impl Application {
                                 Some(buf)
                             }.await;
 
-                            let gradient_colors = thumbnail_buf.as_ref().map(|buf| extract_dominant_colors(buf));
+                            let gradient_colors = thumbnail_buf.as_ref().map(|buf| extract_dominant_colors(buf, &theme_name));
                             let thumbnail = thumbnail_buf.map(|buf| iced::widget::image::Handle::from_bytes(buf));
 
                             Some(MediaMetadata {
@@ -423,6 +424,7 @@ impl Application {
                     None => return Task::none(),
                 };
 
+                let theme_name = self.theme.value().name().to_string();
                 let existing = self.media_metadata.clone();
 
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -454,7 +456,7 @@ impl Application {
                                     Some(buf)
                                 }.await;
 
-                                let gradient_colors = thumb.as_ref().map(|b| extract_dominant_colors(b));
+                                let gradient_colors = thumb.as_ref().map(|b| extract_dominant_colors(b, &theme_name));
                                 let thumbnail = thumb.map(iced::widget::image::Handle::from_bytes);
 
                                 (thumbnail, gradient_colors)
@@ -623,7 +625,7 @@ impl Application {
                     )));
                 }
 
-                Task::none()
+                Task::done(Message::GetPlayer)
             }
             Message::AnimateGradientC1(event) => {
                 self.gradient_c1.update(event);
@@ -4695,7 +4697,7 @@ fn lat_lon_to_xy(lat: f64, lon: f64, width: f32, height: f32) -> Point {
     Point::new(x as f32, y as f32)
 }
 
-fn extract_dominant_colors(buf: &[u8]) -> (Color, Color) {
+fn extract_dominant_colors(buf: &[u8], theme_name: &str) -> (Color, Color) {
     let img = image::load_from_memory(buf).unwrap().to_rgb8();
 
     let pixels: Vec<[f32; 3]> = img
@@ -4752,12 +4754,18 @@ fn extract_dominant_colors(buf: &[u8]) -> (Color, Color) {
     }
 
     let darken = |c: [f32; 3]| {
-        let min = 0.15f32;
-        Color::from_rgb(
-            (c[0] * 0.6).max(min),
-            (c[1] * 0.6).max(min),
-            (c[2] * 0.6).max(min),
-        )
+        if theme_name == "classic" {
+            let min = 0.15f32;
+            Color::from_rgb(
+                (c[0] * 0.6).max(min),
+                (c[1] * 0.6).max(min),
+                (c[2] * 0.6).max(min),
+            )
+        } else {
+            let luma = c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
+            let l = (luma * 0.3).min(0.25);
+            Color::from_rgb((l * 2.5).max(0.15).min(0.5), l * 0.3, l * 0.3)
+        }
     };
 
     (darken(c1), darken(c2))
