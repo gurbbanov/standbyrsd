@@ -4256,7 +4256,11 @@ impl MediaWidgetHalf {
                         m.position / 10000000
                     },
                     m.duration / 10000000,
-                    (m.position / 10000) + (*time - m.position_origin).num_milliseconds(),
+                    if m.is_playing {
+                        (m.position / 10000) + (*time - m.position_origin).num_milliseconds()
+                    } else {
+                        m.position / 10000
+                    },
                     m.duration / 10000,
                 ),
                 None => (
@@ -4438,7 +4442,11 @@ impl MediaWidgetFull {
                         m.position / 10000000
                     },
                     m.duration / 10000000,
-                    (m.position / 10000) + (*time - m.position_origin).num_milliseconds(),
+                    if m.is_playing {
+                        (m.position / 10000) + (*time - m.position_origin).num_milliseconds()
+                    } else {
+                        m.position / 10000
+                    },
                     m.duration / 10000,
                 ),
                 None => (
