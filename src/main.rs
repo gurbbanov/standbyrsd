@@ -327,7 +327,8 @@ impl Application {
                                     windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
                                 ),
                                 thumbnail,
-                                gradient_colors
+                                gradient_colors,
+                                position_origin: chrono::Local::now(),
                             })
                         }.await;
 
@@ -462,10 +463,18 @@ impl Application {
                                 (e.thumbnail.clone(), e.gradient_colors)
                             };
 
+                            let position = timeline.Position().ok()?.Duration;
+
+                            let position_origin = if existing.as_ref().map(|e| e.position) == Some(position) {
+                                existing.as_ref()?.position_origin
+                            } else {
+                                chrono::Local::now()
+                            };
+
                             Some(MediaMetadata {
                                 title,
                                 artist,
-                                position: timeline.Position().ok()?.Duration,
+                                position,
                                 duration: timeline.EndTime().ok()?.Duration,
                                 is_playing: matches!(
                                     playback.PlaybackStatus().ok()?,
@@ -473,6 +482,7 @@ impl Application {
                                 ),
                                 thumbnail,
                                 gradient_colors,
+                                position_origin
                             })
                         }.await;
                         let _ = tx.send(result);
@@ -576,12 +586,11 @@ impl Application {
             }
             Message::MetadataSave(metadata) => {
                 self.metadata_updating = false;
-                if let Some(ref m) = metadata {
-                    if let Some((c1, c2)) = m.gradient_colors {
-                        self.gradient_c1.set_target(c1);
-                        self.gradient_c2.set_target(c2);
-                    }
+                if let Some((c1, c2)) = metadata.as_ref().and_then(|m| m.gradient_colors) {
+                    self.gradient_c1.set_target(c1);
+                    self.gradient_c2.set_target(c2);
                 }
+
                 self.media_metadata = metadata;
 
                 Task::none()
@@ -1608,7 +1617,7 @@ impl AppWidget {
             AppWidget::Clock(w) => w.view(time, weather, theme, size),
             AppWidget::Calendar(w) => w.view(time),
             AppWidget::Weather(w) => w.view(theme, time, weather, size),
-            AppWidget::Media(w) => w.view(media_metadata, theme, size, gc1, gc2),
+            AppWidget::Media(w) => w.view(media_metadata, theme, size, gc1, gc2, time),
         }
     }
 
@@ -4147,8 +4156,9 @@ impl MediaWidget {
         size: Size,
         gc1: Color,
         gc2: Color,
+        time: &'a DateTime<Local>,
     ) -> Element<'a, Message> {
-        self.style.view(media_metadata, theme, size, gc1, gc2)
+        self.style.view(media_metadata, theme, size, gc1, gc2, time)
     }
 }
 
@@ -4171,10 +4181,11 @@ impl MediaStyle {
         size: Size,
         gc1: Color,
         gc2: Color,
+        time: &'a DateTime<Local>,
     ) -> Element<'a, Message> {
         match self {
-            MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size),
-            MediaStyle::MediaFull(m) => m.view(media_metadata, theme, size, gc1, gc2),
+            MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size, time),
+            MediaStyle::MediaFull(m) => m.view(media_metadata, theme, size, gc1, gc2, time),
             _ => unimplemented!(),
         }
     }
@@ -4201,6 +4212,7 @@ impl MediaWidgetHalf {
         media_metadata: &'a Option<MediaMetadata>,
         theme: &'a Theme,
         size: Size,
+        time: &'a DateTime<Local>,
     ) -> Element<'a, Message> {
         let s = size.width.min(size.height);
         let palette = theme.palette();
@@ -4229,16 +4241,32 @@ impl MediaWidgetHalf {
                     })
             };
 
-        let (title, artist, is_playing, position, duration) = match media_metadata {
-            Some(m) => (
-                m.title.clone(),
-                m.artist.clone(),
-                m.is_playing,
-                m.position / 10000000,
-                m.duration / 10000000,
-            ),
-            None => ("Not playing".to_string(), "—".to_string(), false, 0, 0),
-        };
+        let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
+            match media_metadata {
+                Some(m) => (
+                    m.title.clone(),
+                    m.artist.clone(),
+                    m.is_playing,
+                    if m.is_playing {
+                        let elapsed = (*time - m.position_origin).num_milliseconds();
+                        ((m.position / 10000000) * 1000 + elapsed) / 1000
+                    } else {
+                        m.position / 10000000
+                    },
+                    m.duration / 10000000,
+                    (m.position / 10000) + (*time - m.position_origin).num_milliseconds(),
+                    m.duration / 10000,
+                ),
+                None => (
+                    "Not playing".to_string(),
+                    "—".to_string(),
+                    false,
+                    0,
+                    0,
+                    0,
+                    0,
+                ),
+            };
 
         let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
             button(
@@ -4313,7 +4341,7 @@ impl MediaWidgetHalf {
             container(
                 iced::widget::progress_bar(
                     0.0..=100.0,
-                    position as f32 / (duration as f32 / 100.0),
+                    position_ms as f32 / (duration_ms as f32 / 100.0),
                 )
                 .style(move |_theme: &Theme| iced::widget::progress_bar::Style {
                     background: iced::Background::Color(palette.danger),
@@ -4363,6 +4391,7 @@ impl MediaWidgetFull {
         size: Size,
         gc1: Color,
         gc2: Color,
+        time: &'a DateTime<Local>,
     ) -> Element<'a, Message> {
         let s = size.height.min(size.width / 2.0);
         let palette = theme.palette();
@@ -4394,16 +4423,32 @@ impl MediaWidgetFull {
                     })
             };
 
-        let (title, artist, is_playing, position, duration) = match media_metadata {
-            Some(m) => (
-                m.title.clone(),
-                m.artist.clone(),
-                m.is_playing,
-                m.position / 10000000,
-                m.duration / 10000000,
-            ),
-            None => ("Not playing".to_string(), "—".to_string(), false, 0, 0),
-        };
+        let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
+            match media_metadata {
+                Some(m) => (
+                    m.title.clone(),
+                    m.artist.clone(),
+                    m.is_playing,
+                    if m.is_playing {
+                        let elapsed = (*time - m.position_origin).num_seconds();
+                        ((m.position / 10000000) + elapsed).max(0)
+                    } else {
+                        m.position / 10000000
+                    },
+                    m.duration / 10000000,
+                    (m.position / 10000) + (*time - m.position_origin).num_milliseconds(),
+                    m.duration / 10000,
+                ),
+                None => (
+                    "Not playing".to_string(),
+                    "—".to_string(),
+                    false,
+                    0,
+                    0,
+                    0,
+                    0,
+                ),
+            };
 
         let btn = |handle: svg::Handle, msg: Message| -> Element<Message> {
             button(
@@ -4482,7 +4527,7 @@ impl MediaWidgetFull {
                 container(
                     iced::widget::progress_bar(
                         0.0..=100.0,
-                        position as f32 / (duration as f32 / 100.0),
+                        position_ms as f32 / (duration_ms as f32 / 100.0),
                     )
                     .style(move |_theme: &Theme| {
                         iced::widget::progress_bar::Style {
@@ -4563,6 +4608,7 @@ struct MediaMetadata {
     is_playing: bool,
     thumbnail: Option<iced::widget::image::Handle>,
     gradient_colors: Option<(Color, Color)>,
+    position_origin: DateTime<Local>,
 }
 
 pub fn weekday_to_number(weekday: &Weekday) -> usize {
