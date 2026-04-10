@@ -51,6 +51,9 @@ const SF_PRO_DISPLAY_BLACK: Font = Font {
     ..Font::DEFAULT
 };
 
+const FULLSCREEN_EXIT_SVG: &[u8] = include_bytes!("../icons/fullscreen-exit.svg");
+const FULLSCREEN_ENTER_SVG: &[u8] = include_bytes!("../icons/fullscreen-enter.svg");
+
 pub fn main() -> iced::Result {
     iced::daemon(Application::new, Application::update, Application::view)
         .subscription(Application::subscription)
@@ -1053,9 +1056,11 @@ impl Application {
             container(
                 iced::widget::mouse_area(
                     button(
-                        svg(svg::Handle::from_memory(include_bytes!(
-                            "../icons/fullscreen.svg"
-                        )))
+                        svg(svg::Handle::from_memory(if self.fullscreen {
+                            FULLSCREEN_EXIT_SVG
+                        } else {
+                            FULLSCREEN_ENTER_SVG
+                        }))
                         .style(move |_theme: &Theme, _status| svg::Style {
                             color: Some(fullscreen_btn_color),
                             ..Default::default()
@@ -1183,7 +1188,7 @@ impl Default for Application {
             #[cfg(target_os = "windows")]
             session: None,
             media_metadata: None,
-            fullscreen: false,
+            fullscreen: true,
             fullscreen_btn_hover: Animated::new(
                 0.0f32,
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
