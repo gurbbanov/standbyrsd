@@ -122,6 +122,8 @@ struct Application {
     gradient_c2: Animated<Color>,
     theme: Animated<Theme>,
     fullscreen: bool,
+    fullscreen_btn_hover: Animated<Color>,
+    theme_btn_hover: Animated<Color>,
     #[cfg(target_os = "windows")]
     playerctl: Option<GlobalSystemMediaTransportControlsSessionManager>,
     #[cfg(target_os = "windows")]
@@ -145,6 +147,10 @@ enum Message {
     AnimateGradientC1(iced_anim::Event<Color>),
     AnimateGradientC2(iced_anim::Event<Color>),
     AnimateTheme(iced_anim::Event<Theme>),
+    ThemeBtnHover(bool),
+    FullscreenBtnHover(bool),
+    AnimateThemBtn(iced_anim::Event<Color>),
+    AnimateFullscreenBtn(iced_anim::Event<Color>),
     ToggleFullscreen,
     DragDelta(f32),
     SnapTick(Instant),
@@ -665,6 +671,30 @@ impl Application {
                     Task::none()
                 }
             }
+            Message::ThemeBtnHover(hovered) => {
+                self.theme_btn_hover.set_target(if hovered {
+                    self.theme.value().palette().primary
+                } else {
+                    Color::BLACK
+                });
+                Task::none()
+            }
+            Message::FullscreenBtnHover(hovered) => {
+                self.fullscreen_btn_hover.set_target(if hovered {
+                    self.theme.value().palette().primary
+                } else {
+                    Color::BLACK
+                });
+                Task::none()
+            }
+            Message::AnimateThemBtn(e) => {
+                self.theme_btn_hover.update(e);
+                Task::none()
+            }
+            Message::AnimateFullscreenBtn(e) => {
+                self.fullscreen_btn_hover.update(e);
+                Task::none()
+            }
             Message::DragDelta(dx) => {
                 let pw = self.page_width;
                 let prev = match &self.drag {
@@ -874,49 +904,58 @@ impl Application {
     fn view(&self, _id: Id) -> Element<'_, Message> {
         match self.main_window {
             Some(_id) => Animation::new(
-                &self.theme,
+                &self.theme_btn_hover,
                 Animation::new(
-                    &self.gradient_c1,
+                    &self.fullscreen_btn_hover,
                     Animation::new(
-                        &self.gradient_c2,
-                        responsive(move |size| {
-                            let total_offset: f32 = match &self.drag {
-                                DragState::Idle => -(self.current_page as f32) * size.width,
-                                DragState::Active { offset_px, .. } => {
-                                    -(self.current_page as f32) * size.width + offset_px
-                                }
-                                DragState::Snapping {
-                                    start_offset,
-                                    end_offset,
-                                    velocity,
-                                    started_at,
-                                } => {
-                                    let elapsed = started_at.elapsed().as_secs_f32();
-                                    let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0)).min(1.0);
-                                    let dist = end_offset - start_offset;
-                                    let v0 = if dist.abs() > 0.001 {
-                                        velocity / dist
-                                    } else {
-                                        0.0
+                        &self.theme,
+                        Animation::new(
+                            &self.gradient_c1,
+                            Animation::new(
+                                &self.gradient_c2,
+                                responsive(move |size| {
+                                    let total_offset: f32 = match &self.drag {
+                                        DragState::Idle => -(self.current_page as f32) * size.width,
+                                        DragState::Active { offset_px, .. } => {
+                                            -(self.current_page as f32) * size.width + offset_px
+                                        }
+                                        DragState::Snapping {
+                                            start_offset,
+                                            end_offset,
+                                            velocity,
+                                            started_at,
+                                        } => {
+                                            let elapsed = started_at.elapsed().as_secs_f32();
+                                            let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0))
+                                                .min(1.0);
+                                            let dist = end_offset - start_offset;
+                                            let v0 = if dist.abs() > 0.001 {
+                                                velocity / dist
+                                            } else {
+                                                0.0
+                                            };
+                                            start_offset + dist * ease_spring(t, v0)
+                                        }
                                     };
-                                    start_offset + dist * ease_spring(t, v0)
-                                }
-                            };
 
-                            slide_pages(
-                                total_offset,
-                                size.width,
-                                size.height,
-                                self.page0(size),
-                                self.page1(size),
+                                    slide_pages(
+                                        total_offset,
+                                        size.width,
+                                        size.height,
+                                        self.page0(size),
+                                        self.page1(size),
+                                    )
+                                }),
                             )
-                        }),
+                            .on_update(Message::AnimateGradientC2),
+                        )
+                        .on_update(Message::AnimateGradientC1),
                     )
-                    .on_update(Message::AnimateGradientC2),
+                    .on_update(Message::AnimateTheme),
                 )
-                .on_update(Message::AnimateGradientC1),
+                .on_update(Message::AnimateFullscreenBtn),
             )
-            .on_update(Message::AnimateTheme)
+            .on_update(Message::AnimateThemBtn)
             .into(),
             None => container(text("window is closed")).into(),
         }
@@ -969,18 +1008,66 @@ impl Application {
         let left = vertical_carousel(left_items, sw, sh);
         let right = vertical_carousel(right_items, sw, sh);
 
-        let dark_btn: Element<Message> =
-            button("toggle theme").on_press(Message::ToggleTheme).into();
+        // let dark_btn: Element<Message> =
+        //     button("toggle theme").on_press(Message::ToggleTheme).into();
 
         container(row![
-            left,
+            stack![
+                left,
+                iced::widget::mouse_area(
+                    container(
+                        button(
+                            svg(svg::Handle::from_memory(include_bytes!(
+                                "../icons/dark_theme.svg"
+                            )))
+                            .style(move |_theme: &Theme, _status| svg::Style {
+                                color: Some(*self.theme_btn_hover.value()),
+                                ..Default::default()
+                            })
+                            .width(Length::Fixed(sw.min(sh) * 0.1))
+                            .height(Length::Fixed(sh.min(sw) * 0.1)),
+                        )
+                        .style(|_, _| button::Style {
+                            background: None,
+                            ..Default::default()
+                        })
+                        .on_press(Message::ToggleTheme)
+                    )
+                    .padding(Padding::new(sw.min(sh * 0.03)))
+                    .width(Length::Fill)
+                    .align_x(Alignment::Start)
+                )
+                .on_enter(Message::ThemeBtnHover(true))
+                .on_exit(Message::ThemeBtnHover(false))
+            ],
             stack![
                 right,
                 row![
-                    dark_btn,
-                    container(button("fullscreen").on_press(Message::ToggleFullscreen))
+                    iced::widget::mouse_area(
+                        container(
+                            button(
+                                svg(svg::Handle::from_memory(include_bytes!(
+                                    "../icons/fullscreen.svg"
+                                )))
+                                .style(move |_theme: &Theme, _status| svg::Style {
+                                    color: Some(*self.fullscreen_btn_hover.value()),
+                                    ..Default::default()
+                                })
+                                .width(Length::Fixed(sw.min(sh) * 0.1))
+                                .height(Length::Fixed(sh.min(sw) * 0.1)),
+                            )
+                            .style(|_, _| button::Style {
+                                background: None,
+                                ..Default::default()
+                            })
+                            .on_press(Message::ToggleFullscreen)
+                        )
+                        .padding(Padding::new(sw.min(sh * 0.03)))
                         .width(Length::Fill)
                         .align_x(Alignment::End)
+                    )
+                    .on_enter(Message::FullscreenBtnHover(true))
+                    .on_exit(Message::FullscreenBtnHover(false))
                 ],
             ]
             .width(Length::Fixed(sw))
@@ -1092,6 +1179,14 @@ impl Default for Application {
             session: None,
             media_metadata: None,
             fullscreen: false,
+            fullscreen_btn_hover: Animated::new(
+                Color::BLACK,
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
+            theme_btn_hover: Animated::new(
+                Color::BLACK,
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
             main_window: None,
             current_page: 0,
             page_width: 800.0,
@@ -4292,7 +4387,7 @@ impl MediaWidgetHalf {
                 button(
                     svg(handle)
                         .style(move |_theme: &Theme, _status| svg::Style {
-                            color: Some(palette.primary),
+                            color: Some(palette.text),
                             ..Default::default()
                         })
                         .width(Length::Fixed(size))
@@ -4314,12 +4409,12 @@ impl MediaWidgetHalf {
         let timecode = row![
             text(fmt_time(position))
                 .size(s * 0.03)
-                .color(palette.primary)
+                .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
             iced::widget::Space::new().width(Length::Fill),
             text(fmt_time(duration))
                 .size(s * 0.03)
-                .color(palette.primary)
+                .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
         ]
         .width(Length::Fixed(s * 0.8));
@@ -4356,13 +4451,13 @@ impl MediaWidgetHalf {
             thumbnail,
             column![
                 text(title)
-                    .size(s * 0.04)
+                    .size(s * 0.05)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.primary),
+                    .color(palette.text),
                 text(artist)
                     .size(s * 0.03)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.danger),
+                    .color(palette.primary),
             ]
             .spacing(s * 0.02),
             container(
@@ -4372,14 +4467,14 @@ impl MediaWidgetHalf {
                 )
                 .style(move |_theme: &Theme| iced::widget::progress_bar::Style {
                     background: iced::Background::Color(palette.danger),
-                    bar: iced::Background::Color(palette.primary),
+                    bar: iced::Background::Color(palette.text),
                     border: iced::Border {
                         radius: (s * 0.05).into(),
                         ..Default::default()
                     },
                 })
             )
-            .height(Length::Fixed(s * 0.02))
+            .height(Length::Fixed(s * 0.03))
             .width(Length::Fixed(s * 0.8))
             .align_x(iced::Alignment::Center),
             timecode,
@@ -4497,7 +4592,7 @@ impl MediaWidgetFull {
                 button(
                     svg(handle)
                         .style(move |_theme: &Theme, _status| svg::Style {
-                            color: Some(palette.primary),
+                            color: Some(palette.text),
                             ..Default::default()
                         })
                         .width(Length::Fixed(size))
@@ -4519,12 +4614,12 @@ impl MediaWidgetFull {
         let timecode = row![
             text(fmt_time(position))
                 .size(s * 0.03)
-                .color(palette.primary)
+                .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
             iced::widget::Space::new().width(Length::Fill),
             text(fmt_time(duration))
                 .size(s * 0.03)
-                .color(palette.primary)
+                .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
         ]
         .width(Length::Fixed(s * 0.8));
@@ -4562,14 +4657,14 @@ impl MediaWidgetFull {
                 text(title)
                     .size(s * 0.09)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.primary)
+                    .color(palette.text)
                     .width(Length::Fixed(s * 0.8))
                     .shaping(iced::widget::text::Shaping::Advanced)
                     .wrapping(iced::widget::text::Wrapping::None),
                 text(artist)
                     .size(s * 0.05)
                     .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.danger)
+                    .color(palette.primary)
                     .width(Length::Fixed(s * 0.8))
                     .shaping(iced::widget::text::Shaping::Advanced)
                     .wrapping(iced::widget::text::Wrapping::None),
@@ -4588,15 +4683,15 @@ impl MediaWidgetFull {
                     .style(move |_theme: &Theme| {
                         iced::widget::progress_bar::Style {
                             background: iced::Background::Color(palette.danger),
-                            bar: iced::Background::Color(palette.primary),
+                            bar: iced::Background::Color(palette.text),
                             border: iced::Border {
-                                radius: (s * 0.05).into(),
+                                radius: (s * 0.07).into(),
                                 ..Default::default()
                             },
                         }
                     })
                 )
-                .height(Length::Fixed(s * 0.02))
+                .height(Length::Fixed(s * 0.04))
                 .width(Length::Fixed(s * 0.8)),
                 timecode
             ]
