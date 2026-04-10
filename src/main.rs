@@ -33,6 +33,13 @@ const SF_PRO_EXPANDED_BOLD: Font = Font {
     style: Style::Normal,
 };
 
+const SF_PRO_CONDENSED_EXTRABOLD: Font = Font {
+    family: Family::Name("SF Pro"),
+    weight: Weight::ExtraBold,
+    stretch: Stretch::Condensed,
+    style: Style::Normal,
+};
+
 const SF_PRO_ROUNDED_BLACK: Font = Font {
     family: Family::Name("SF Pro Rounded"),
     weight: Weight::Black,
@@ -63,6 +70,7 @@ pub fn main() -> iced::Result {
                 include_bytes!("../fonts/SF-Pro-Expanded.ttf").into(),
                 include_bytes!("../fonts/SF-Pro-Display-Black.otf").into(),
                 include_bytes!("../fonts/SF-Pro-Display-Bold.otf").into(),
+                include_bytes!("../fonts/SF-Pro-Condensed.ttf").into(),
             ],
             default_font: Font {
                 family: Family::Name("SF Pro Rounded"),
@@ -2099,7 +2107,6 @@ impl DigitalClockHalf {
 
 impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>) {
     type State = ();
-
     fn draw(
         &self,
         _state: &Self::State,
@@ -2110,13 +2117,82 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, now) = self;
 
-        let clock = widget.cache.draw(renderer, bounds.size(), |frame| {
+        let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let palette = theme.palette();
-
+            let s = frame.width().min(frame.height()) * 0.8;
             let center = frame.center();
-            let width = frame.width() / 2.0;
 
-            let font_size = width * 0.6;
+            let pad = s * 0.04;
+            let line_len = pad * 0.9;
+            let line_width = s * 0.011;
+            let half_w = line_width / 2.0;
+            let radius = line_width / 2.0;
+            let avail = s - 2.0 * pad;
+            let step = avail / 14.0;
+
+            let subsec = now.nanosecond() as f32 / 1_000_000_000.0;
+            let current_sec = now.second() as i32;
+            const TAIL: i32 = 59;
+
+            frame.with_save(|frame| {
+                frame.translate(Vector::new(center.x, center.y));
+
+                for i in 0..60i32 {
+                    let dist = (current_sec - i).rem_euclid(60);
+                    let alpha = if dist == 0 {
+                        subsec
+                    } else if dist < TAIL {
+                        let d = dist as f32 - (1.0 - subsec);
+                        (1.0 - d / TAIL as f32).max(0.0)
+                    } else if dist == TAIL {
+                        let d = TAIL as f32 - (1.0 - subsec);
+                        (1.0 - d / TAIL as f32).max(0.0)
+                    } else {
+                        0.15
+                    };
+
+                    let color = Color {
+                        a: alpha,
+                        ..palette.text
+                    };
+
+                    let side = (i / 15) as usize;
+                    let j = (i % 15) as f32;
+                    let t = -s / 2.0 + pad + j * step;
+
+                    let (px, py) = match side {
+                        0 => (t, -s / 2.0),
+                        1 => (s / 2.0, t),
+                        2 => (-t, s / 2.0),
+                        3 => (-s / 2.0, -t),
+                        _ => unreachable!(),
+                    };
+
+                    let angle = py.atan2(px) + std::f32::consts::FRAC_PI_2;
+
+                    let perp_angle = match side {
+                        0 | 2 => px.abs().atan2((s / 2.0).abs()),
+                        1 | 3 => py.abs().atan2((s / 2.0).abs()),
+                        _ => unreachable!(),
+                    };
+                    let adjusted_len = line_len / perp_angle.cos().max(0.1);
+
+                    frame.with_save(|frame| {
+                        frame.translate(Vector::new(px, py));
+                        frame.rotate(Radians(angle));
+                        frame.fill(
+                            &Path::rounded_rectangle(
+                                Point::new(-half_w, 0.0),
+                                Size::new(line_width, adjusted_len),
+                                Radius::new(radius),
+                            ),
+                            color,
+                        );
+                    });
+                }
+            });
+
+            let font_size = s * 0.4;
 
             // часы
             frame.fill_text(canvas::Text {
@@ -2127,7 +2203,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 },
                 size: font_size.into(),
                 color: palette.text,
-                font: SF_PRO_ROUNDED_BLACK,
+                font: SF_PRO_CONDENSED_EXTRABOLD,
                 align_x: text::Alignment::Right,
                 align_y: alignment::Vertical::Center,
                 ..Default::default()
@@ -2137,10 +2213,13 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
             let colon = if now.second() % 2 == 0 { ":" } else { " " };
             frame.fill_text(canvas::Text {
                 content: colon.to_string(),
-                position: center,
-                size: font_size.into(),
+                position: Point {
+                    x: center.x,
+                    y: center.y - font_size * 0.1,
+                },
+                size: (font_size * 1.1).into(),
                 color: palette.danger,
-                font: SF_PRO_ROUNDED_BLACK,
+                font: SF_PRO_CONDENSED_EXTRABOLD,
                 align_x: text::Alignment::Center,
                 align_y: alignment::Vertical::Center,
                 ..Default::default()
@@ -2155,14 +2234,14 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 },
                 size: font_size.into(),
                 color: palette.text,
-                font: SF_PRO_ROUNDED_BLACK,
+                font: SF_PRO_CONDENSED_EXTRABOLD,
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Center,
                 ..Default::default()
             });
         });
 
-        vec![clock]
+        vec![dynamic_layer]
     }
 }
 
