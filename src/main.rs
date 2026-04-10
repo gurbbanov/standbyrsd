@@ -122,8 +122,8 @@ struct Application {
     gradient_c2: Animated<Color>,
     theme: Animated<Theme>,
     fullscreen: bool,
-    fullscreen_btn_hover: Animated<Color>,
-    theme_btn_hover: Animated<Color>,
+    fullscreen_btn_hover: Animated<f32>,
+    theme_btn_hover: Animated<f32>,
     #[cfg(target_os = "windows")]
     playerctl: Option<GlobalSystemMediaTransportControlsSessionManager>,
     #[cfg(target_os = "windows")]
@@ -149,8 +149,8 @@ enum Message {
     AnimateTheme(iced_anim::Event<Theme>),
     ThemeBtnHover(bool),
     FullscreenBtnHover(bool),
-    AnimateThemBtn(iced_anim::Event<Color>),
-    AnimateFullscreenBtn(iced_anim::Event<Color>),
+    AnimateThemeBtn(iced_anim::Event<f32>),
+    AnimateFullscreenBtn(iced_anim::Event<f32>),
     ToggleFullscreen,
     DragDelta(f32),
     SnapTick(Instant),
@@ -672,22 +672,17 @@ impl Application {
                 }
             }
             Message::ThemeBtnHover(hovered) => {
-                self.theme_btn_hover.set_target(if hovered {
-                    self.theme.value().palette().primary
-                } else {
-                    Color::BLACK
-                });
+                self.theme_btn_hover
+                    .set_target(if hovered { 1.0 } else { 0.0 });
+
                 Task::none()
             }
             Message::FullscreenBtnHover(hovered) => {
-                self.fullscreen_btn_hover.set_target(if hovered {
-                    self.theme.value().palette().primary
-                } else {
-                    Color::BLACK
-                });
+                self.fullscreen_btn_hover
+                    .set_target(if hovered { 1.0 } else { 0.0 });
                 Task::none()
             }
-            Message::AnimateThemBtn(e) => {
+            Message::AnimateThemeBtn(e) => {
                 self.theme_btn_hover.update(e);
                 Task::none()
             }
@@ -904,11 +899,11 @@ impl Application {
     fn view(&self, _id: Id) -> Element<'_, Message> {
         match self.main_window {
             Some(_id) => Animation::new(
-                &self.theme_btn_hover,
+                &self.theme,
                 Animation::new(
-                    &self.fullscreen_btn_hover,
+                    &self.theme_btn_hover,
                     Animation::new(
-                        &self.theme,
+                        &self.fullscreen_btn_hover,
                         Animation::new(
                             &self.gradient_c1,
                             Animation::new(
@@ -951,11 +946,11 @@ impl Application {
                         )
                         .on_update(Message::AnimateGradientC1),
                     )
-                    .on_update(Message::AnimateTheme),
+                    .on_update(Message::AnimateFullscreenBtn),
                 )
-                .on_update(Message::AnimateFullscreenBtn),
+                .on_update(Message::AnimateThemeBtn),
             )
-            .on_update(Message::AnimateThemBtn)
+            .on_update(Message::AnimateTheme)
             .into(),
             None => container(text("window is closed")).into(),
         }
@@ -1008,70 +1003,80 @@ impl Application {
         let left = vertical_carousel(left_items, sw, sh);
         let right = vertical_carousel(right_items, sw, sh);
 
-        // let dark_btn: Element<Message> =
-        //     button("toggle theme").on_press(Message::ToggleTheme).into();
+        let primary = self.theme.value().palette().primary;
 
-        container(row![
-            stack![
-                left,
+        let t_theme = *self.theme_btn_hover.value();
+        let theme_btn_color = Color {
+            r: primary.r * t_theme + 0.0 * (1.0 - t_theme),
+            g: primary.g * t_theme + 0.0 * (1.0 - t_theme),
+            b: primary.b * t_theme + 0.0 * (1.0 - t_theme),
+            a: 1.0,
+        };
+
+        let t_fullscreen = *self.fullscreen_btn_hover.value();
+        let fullscreen_btn_color = Color {
+            r: primary.r * t_fullscreen + 0.0 * (1.0 - t_fullscreen),
+            g: primary.g * t_fullscreen + 0.0 * (1.0 - t_fullscreen),
+            b: primary.b * t_fullscreen + 0.0 * (1.0 - t_fullscreen),
+            a: 1.0,
+        };
+
+        container(stack![
+            row![left, right],
+            container(
                 iced::widget::mouse_area(
-                    container(
-                        button(
-                            svg(svg::Handle::from_memory(include_bytes!(
-                                "../icons/dark_theme.svg"
-                            )))
-                            .style(move |_theme: &Theme, _status| svg::Style {
-                                color: Some(*self.theme_btn_hover.value()),
-                                ..Default::default()
-                            })
-                            .width(Length::Fixed(sw.min(sh) * 0.1))
-                            .height(Length::Fixed(sh.min(sw) * 0.1)),
-                        )
-                        .style(|_, _| button::Style {
-                            background: None,
+                    button(
+                        svg(svg::Handle::from_memory(include_bytes!(
+                            "../icons/dark_theme.svg"
+                        )))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(theme_btn_color),
                             ..Default::default()
                         })
-                        .on_press(Message::ToggleTheme)
+                        .width(Length::Fixed(sw.min(sh) * 0.1 * t_theme.max(0.3)))
+                        .height(Length::Fixed(sw.min(sh) * 0.1 * t_theme.max(0.3))),
                     )
-                    .padding(Padding::new(sw.min(sh * 0.03)))
-                    .width(Length::Fill)
-                    .align_x(Alignment::Start)
+                    .style(|_, _| button::Style {
+                        background: None,
+                        ..Default::default()
+                    })
+                    .on_press(Message::ToggleTheme)
                 )
                 .on_enter(Message::ThemeBtnHover(true))
-                .on_exit(Message::ThemeBtnHover(false))
-            ],
-            stack![
-                right,
-                row![
-                    iced::widget::mouse_area(
-                        container(
-                            button(
-                                svg(svg::Handle::from_memory(include_bytes!(
-                                    "../icons/fullscreen.svg"
-                                )))
-                                .style(move |_theme: &Theme, _status| svg::Style {
-                                    color: Some(*self.fullscreen_btn_hover.value()),
-                                    ..Default::default()
-                                })
-                                .width(Length::Fixed(sw.min(sh) * 0.1))
-                                .height(Length::Fixed(sh.min(sw) * 0.1)),
-                            )
-                            .style(|_, _| button::Style {
-                                background: None,
-                                ..Default::default()
-                            })
-                            .on_press(Message::ToggleFullscreen)
-                        )
-                        .padding(Padding::new(sw.min(sh * 0.03)))
-                        .width(Length::Fill)
-                        .align_x(Alignment::End)
+                .on_exit(Message::ThemeBtnHover(false)),
+            )
+            .padding(Padding::new(sw.min(sh) * 0.03))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Start)
+            .align_y(Alignment::Start),
+            container(
+                iced::widget::mouse_area(
+                    button(
+                        svg(svg::Handle::from_memory(include_bytes!(
+                            "../icons/fullscreen.svg"
+                        )))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(fullscreen_btn_color),
+                            ..Default::default()
+                        })
+                        .width(Length::Fixed(sw.min(sh) * 0.1 * t_fullscreen.max(0.3)))
+                        .height(Length::Fixed(sw.min(sh) * 0.1 * t_fullscreen.max(0.3))),
                     )
-                    .on_enter(Message::FullscreenBtnHover(true))
-                    .on_exit(Message::FullscreenBtnHover(false))
-                ],
-            ]
-            .width(Length::Fixed(sw))
-            .height(Length::Fixed(sh)),
+                    .style(|_, _| button::Style {
+                        background: None,
+                        ..Default::default()
+                    })
+                    .on_press(Message::ToggleFullscreen)
+                )
+                .on_enter(Message::FullscreenBtnHover(true))
+                .on_exit(Message::FullscreenBtnHover(false)),
+            )
+            .padding(Padding::new(sw.min(sh) * 0.03))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::End)
+            .align_y(Alignment::Start)
         ])
         .width(Length::Fixed(size.width))
         .height(Length::Fixed(size.height))
@@ -1180,11 +1185,11 @@ impl Default for Application {
             media_metadata: None,
             fullscreen: false,
             fullscreen_btn_hover: Animated::new(
-                Color::BLACK,
+                0.0f32,
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
             ),
             theme_btn_hover: Animated::new(
-                Color::BLACK,
+                0.0f32,
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
             ),
             main_window: None,
