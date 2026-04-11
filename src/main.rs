@@ -17,6 +17,8 @@ use iced::{
 };
 use iced::{Pixels, mouse};
 use iced_anim::{Animated, Animation, Easing};
+#[cfg(target_os = "macos")]
+use media_remote;
 use reqwest;
 use serde::Deserialize;
 use std::cell::Cell;
@@ -139,6 +141,8 @@ struct Application {
     playerctl: Option<GlobalSystemMediaTransportControlsSessionManager>,
     #[cfg(target_os = "windows")]
     session: Option<GlobalSystemMediaTransportControlsSession>,
+    #[cfg(target_os = "macos")]
+    now_playing: Option<media_remote::NowPlayingPerl>,
     media_metadata: Option<MediaMetadata>,
     main_window: Option<window::Id>,
     current_page: usize,
@@ -170,7 +174,7 @@ enum Message {
     GetPlayer,
     #[cfg(target_os = "windows")]
     PlayerInit(GlobalSystemMediaTransportControlsSessionManager),
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "windows"))]
     PlayerInit,
     MetadataSave(Option<MediaMetadata>),
     UpdateMetadata,
@@ -296,7 +300,14 @@ impl Application {
                 }
 
                 #[cfg(target_os = "linux")]
-                Task::done(Message::PlayerInit)
+                {
+                    Task::done(Message::PlayerInit)
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    Task::done(Message::PlayerInit)
+                }
             }
             #[cfg(target_os = "windows")]
             Message::PlayerInit(playerctl) => {
@@ -428,6 +439,15 @@ impl Application {
                 Task::perform(
                     async move { rx.await.ok().flatten() },
                     Message::MetadataSave,
+                )
+            }
+            #[cfg(target_os = "macos")]
+            Message::PlayerInit => {
+                let now_playing = media_remote::NowPlayingPerl::new();
+                self.now_playing = Some(now_playing);
+                Task::perform(
+                    async { tokio::time::sleep(Duration::from_millis(500)).await },
+                    |_| Message::UpdateMetadata,
                 )
             }
             #[cfg(target_os = "windows")]
@@ -594,6 +614,87 @@ impl Application {
                                 gradient_colors,
                                 position_origin,
                             });
+                        } else {
+                            Some(MediaMetadata {
+                                title,
+                                artist,
+                                position,
+                                duration,
+                                is_playing,
+                                position_origin,
+                                ..existing?
+                            })
+                        }
+                    })();
+
+                    let _ = tx.send(result);
+                });
+
+                Task::perform(
+                    async move { rx.await.ok().flatten() },
+                    Message::MetadataSave,
+                )
+            }
+            #[cfg(target_os = "macos")]
+            Message::UpdateMetadata => {
+                if self.metadata_updating {
+                    return Task::none();
+                }
+
+                self.metadata_updating = true;
+
+                let now_playing: Option<media_remote::NowPlayingInfo> = self
+                    .now_playing
+                    .as_ref()
+                    .and_then(|np| np.get_info().as_ref().cloned());
+
+                let existing = self.media_metadata.clone();
+                let theme_name = self.theme.value().name().to_string();
+
+                let (tx, rx) = tokio::sync::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result: Option<MediaMetadata> = (|| {
+                        let info = now_playing?;
+
+                        let title = info.title.unwrap_or_default();
+                        let artist = info.artist.unwrap_or_default();
+                        let duration = (info.duration? * 1e7) as i64;
+                        let position = (info.elapsed_time? * 1e7) as i64;
+                        let is_playing = info.is_playing.unwrap_or(false);
+
+                        let title_changed =
+                            existing.as_ref().map(|e| e.title != title).unwrap_or(true);
+
+                        let position_origin =
+                            if existing.as_ref().map(|e| e.position) == Some(position) {
+                                existing.as_ref()?.position_origin
+                            } else {
+                                chrono::Local::now()
+                            };
+
+                        if title_changed {
+                            let thumbnail_buf: Option<Vec<u8>> = info.album_cover.and_then(|img| {
+                                let mut buf = std::io::Cursor::new(Vec::new());
+                                img.write_to(&mut buf, image::ImageFormat::Png).ok()?;
+                                Some(buf.into_inner())
+                            });
+
+                            let gradient_colors = thumbnail_buf
+                                .as_ref()
+                                .map(|buf| extract_dominant_colors(buf, &theme_name));
+                            let thumbnail = thumbnail_buf
+                                .map(|buf| iced::widget::image::Handle::from_bytes(buf));
+
+                            Some(MediaMetadata {
+                                title,
+                                artist,
+                                position,
+                                duration,
+                                is_playing,
+                                thumbnail,
+                                gradient_colors,
+                                position_origin,
+                            })
                         } else {
                             Some(MediaMetadata {
                                 title,
@@ -788,20 +889,37 @@ impl Application {
                 }
 
                 #[cfg(target_os = "linux")]
-                Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || {
-                            let finder = mpris::PlayerFinder::new().ok()?;
-                            let player = finder.find_active().ok()?;
-                            player.play().ok()?;
-                            Some(())
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                    },
-                    |_| Message::UpdateMetadata,
-                )
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                let finder = mpris::PlayerFinder::new().ok()?;
+                                let player = finder.find_active().ok()?;
+                                player.play().ok()?;
+                                Some(())
+                            })
+                            .await
+                            .ok()
+                            .flatten()
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(|| {
+                                media_remote::send_command(media_remote::Command::Play);
+                            })
+                            .await
+                            .ok();
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
             }
             Message::Pause => {
                 #[cfg(target_os = "windows")]
@@ -819,20 +937,37 @@ impl Application {
                 }
 
                 #[cfg(target_os = "linux")]
-                Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || {
-                            let finder = mpris::PlayerFinder::new().ok()?;
-                            let player = finder.find_active().ok()?;
-                            player.pause().ok()?;
-                            Some(())
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                    },
-                    |_| Message::UpdateMetadata,
-                )
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                let finder = mpris::PlayerFinder::new().ok()?;
+                                let player = finder.find_active().ok()?;
+                                player.pause().ok()?;
+                                Some(())
+                            })
+                            .await
+                            .ok()
+                            .flatten()
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(|| {
+                                media_remote::send_command(media_remote::Command::Pause);
+                            })
+                            .await
+                            .ok();
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
             }
             Message::NextTrack => {
                 #[cfg(target_os = "windows")]
@@ -850,20 +985,37 @@ impl Application {
                 }
 
                 #[cfg(target_os = "linux")]
-                Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || {
-                            let finder = mpris::PlayerFinder::new().ok()?;
-                            let player = finder.find_active().ok()?;
-                            player.next().ok()?;
-                            Some(())
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                    },
-                    |_| Message::UpdateMetadata,
-                )
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                let finder = mpris::PlayerFinder::new().ok()?;
+                                let player = finder.find_active().ok()?;
+                                player.next().ok()?;
+                                Some(())
+                            })
+                            .await
+                            .ok()
+                            .flatten()
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(|| {
+                                media_remote::send_command(media_remote::Command::NextTrack);
+                            })
+                            .await
+                            .ok();
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
             }
             Message::PreviousTrack => {
                 #[cfg(target_os = "windows")]
@@ -881,20 +1033,37 @@ impl Application {
                 }
 
                 #[cfg(target_os = "linux")]
-                Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || {
-                            let finder = mpris::PlayerFinder::new().ok()?;
-                            let player = finder.find_active().ok()?;
-                            player.previous().ok()?;
-                            Some(())
-                        })
-                        .await
-                        .ok()
-                        .flatten()
-                    },
-                    |_| Message::UpdateMetadata,
-                )
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                let finder = mpris::PlayerFinder::new().ok()?;
+                                let player = finder.find_active().ok()?;
+                                player.previous().ok()?;
+                                Some(())
+                            })
+                            .await
+                            .ok()
+                            .flatten()
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(|| {
+                                media_remote::send_command(media_remote::Command::PreviousTrack);
+                            })
+                            .await
+                            .ok();
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::UpdateMetadata,
+                    )
+                }
             }
             Message::None => Task::none(),
         }
@@ -1205,6 +1374,8 @@ impl Default for Application {
             playerctl: None,
             #[cfg(target_os = "windows")]
             session: None,
+            #[cfg(target_os = "macos")]
+            now_playing: None,
             media_metadata: None,
             fullscreen: true,
             fullscreen_btn_hover: Animated::new(
