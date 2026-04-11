@@ -418,6 +418,7 @@ impl Application {
                             is_playing,
                             thumbnail,
                             gradient_colors,
+                            position_origin: chrono::Local::now(),
                         })
                     })();
 
@@ -553,6 +554,13 @@ impl Application {
                         let title_changed =
                             existing.as_ref().map(|m| m.title.as_str()) != Some(title.as_str());
 
+                        let position_origin =
+                            if existing.as_ref().map(|e| e.position) == Some(position) {
+                                existing.as_ref()?.position_origin
+                            } else {
+                                chrono::Local::now()
+                            };
+
                         if title_changed {
                             let thumbnail_buf = metadata
                                 .get("mpris:artUrl")
@@ -584,6 +592,7 @@ impl Application {
                                 is_playing,
                                 thumbnail,
                                 gradient_colors,
+                                position_origin,
                             });
                         } else {
                             Some(MediaMetadata {
@@ -592,6 +601,7 @@ impl Application {
                                 position,
                                 duration,
                                 is_playing,
+                                position_origin,
                                 ..existing?
                             })
                         }
@@ -2119,7 +2129,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
 
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let palette = theme.palette();
-            let s = frame.width().min(frame.height()) * 0.8;
+            let s = frame.width().min(frame.height()) * 0.9;
             let center = frame.center();
 
             let pad = s * 0.04;
@@ -4431,7 +4441,6 @@ impl MediaWidgetHalf {
 
         let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
             match media_metadata {
-                #[cfg(target_os = "windows")]
                 Some(m) => (
                     m.title.clone(),
                     m.artist.clone(),
@@ -4448,16 +4457,6 @@ impl MediaWidgetHalf {
                     } else {
                         m.position / 10000
                     },
-                    m.duration / 10000,
-                ),
-                #[cfg(target_os = "linux")]
-                Some(m) => (
-                    m.title.clone(),
-                    m.artist.clone(),
-                    m.is_playing,
-                    m.position / 10000000,
-                    m.duration / 10000000,
-                    m.position / 10000,
                     m.duration / 10000,
                 ),
                 None => (
@@ -4636,7 +4635,6 @@ impl MediaWidgetFull {
 
         let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
             match media_metadata {
-                #[cfg(target_os = "windows")]
                 Some(m) => (
                     m.title.clone(),
                     m.artist.clone(),
@@ -4653,16 +4651,6 @@ impl MediaWidgetFull {
                     } else {
                         m.position / 10000
                     },
-                    m.duration / 10000,
-                ),
-                #[cfg(target_os = "linux")]
-                Some(m) => (
-                    m.title.clone(),
-                    m.artist.clone(),
-                    m.is_playing,
-                    m.position / 10000000,
-                    m.duration / 10000000,
-                    m.position / 10000,
                     m.duration / 10000,
                 ),
                 None => (
@@ -4848,7 +4836,6 @@ struct MediaMetadata {
     is_playing: bool,
     thumbnail: Option<iced::widget::image::Handle>,
     gradient_colors: Option<(Color, Color)>,
-    #[cfg(target_os = "windows")]
     position_origin: DateTime<Local>,
 }
 
