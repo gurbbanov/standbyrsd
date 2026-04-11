@@ -2313,7 +2313,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
 
             let subsec = now.nanosecond() as f32 / 1_000_000_000.0;
             let current_sec = now.second() as i32;
-            const TAIL: i32 = 59;
+            const TAIL: i32 = 60;
 
             frame.with_save(|frame| {
                 frame.translate(Vector::new(center.x, center.y));
@@ -2337,8 +2337,11 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                         ..palette.text
                     };
 
-                    let side = (i / 15) as usize;
-                    let j = (i % 15) as f32;
+                    let offset = 7;
+                    let pos = (i + offset).rem_euclid(60);
+
+                    let side = (pos / 15) as usize;
+                    let j = (pos % 15) as f32;
                     let t = -s / 2.0 + pad + j * step;
 
                     let (px, py) = match side {
@@ -2481,8 +2484,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
             let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
             let hour_hand_angle = Radians::from(hand_rotation(now.hour(), 12)) + minutes_portion;
             let minute_angle = hand_rotation(now.minute() * 15 + now.second() / 4, 900);
-            let second_angle =
-                hand_rotation_sec(seconds, 60.0).0 - std::f32::consts::FRAC_PI_2 * 2.0;
+            let second_angle = hand_rotation_sec(seconds, 60.0).0;
 
             frame.translate(Vector::new(center.x, center.y));
 
