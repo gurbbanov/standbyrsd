@@ -144,6 +144,7 @@ struct Application {
     #[cfg(target_os = "macos")]
     now_playing: Option<media_remote::NowPlayingPerl>,
     media_metadata: Option<MediaMetadata>,
+    seek_preview: Option<f32>,
     main_window: Option<window::Id>,
     current_page: usize,
     page_width: f32,
@@ -182,6 +183,8 @@ enum Message {
     Pause,
     NextTrack,
     PreviousTrack,
+    SeekPreview(f32),
+    SeekCommit(f32),
     None,
 }
 
@@ -1065,6 +1068,40 @@ impl Application {
                     )
                 }
             }
+            Message::SeekPreview(ratio) => {
+                self.seek_preview = Some(ratio);
+                Task::none()
+            }
+            Message::SeekCommit(ratio) => {
+                self.seek_preview = None;
+                #[cfg(target_os = "windows")]
+                {
+                    let session = self.session.clone();
+                    let duration = self
+                        .media_metadata
+                        .as_ref()
+                        .map(|m| m.duration)
+                        .unwrap_or(0);
+                    let position = (ratio * duration as f32) as i64;
+                    return Task::perform(
+                        async move {
+                            if let Some(s) = session {
+                                use windows::Foundation::TimeSpan;
+                                s.TryChangePlaybackPositionAsync(
+                                    TimeSpan { Duration: position }.Duration,
+                                )
+                                .unwrap()
+                                .await
+                                .unwrap();
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        },
+                        |_| Message::UpdateMetadata,
+                    );
+                }
+                #[allow(unreachable_code)]
+                Task::none()
+            }
             Message::None => Task::none(),
         }
     }
@@ -1164,6 +1201,7 @@ impl Application {
                     slot_size,
                     *self.gradient_c1.value(),
                     *self.gradient_c2.value(),
+                    self.seek_preview,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1183,6 +1221,7 @@ impl Application {
                     slot_size,
                     *self.gradient_c1.value(),
                     *self.gradient_c2.value(),
+                    self.seek_preview,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1288,6 +1327,7 @@ impl Application {
                     size,
                     *self.gradient_c1.value(),
                     *self.gradient_c2.value(),
+                    self.seek_preview,
                 ))
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
@@ -1377,6 +1417,7 @@ impl Default for Application {
             #[cfg(target_os = "macos")]
             now_playing: None,
             media_metadata: None,
+            seek_preview: None,
             fullscreen: true,
             fullscreen_btn_hover: Animated::new(
                 0.0f32,
@@ -1910,12 +1951,15 @@ impl AppWidget {
         size: Size,
         gc1: Color,
         gc2: Color,
+        seek_preview: Option<f32>,
     ) -> Element<'a, Message> {
         match self {
             AppWidget::Clock(w) => w.view(time, weather, theme, size),
             AppWidget::Calendar(w) => w.view(time),
             AppWidget::Weather(w) => w.view(theme, time, weather, size),
-            AppWidget::Media(w) => w.view(media_metadata, theme, size, gc1, gc2, time),
+            AppWidget::Media(w) => {
+                w.view(media_metadata, theme, size, gc1, gc2, time, seek_preview)
+            }
         }
     }
 
@@ -2043,7 +2087,7 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
             let grid_w = cell_w * columns as f32;
             let total_h = month_font_size + cell_h * (1.0 + num_rows as f32);
             let offset_x = (w - grid_w) * 0.5;
-            let offset_y = (h - total_h) * 0.6;
+            let offset_y = (h - total_h) * 0.5;
 
             frame.fill_text(canvas::Text {
                 content: format!("   {}", now.format("%B")).to_uppercase(),
@@ -2484,7 +2528,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
             let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
             let hour_hand_angle = Radians::from(hand_rotation(now.hour(), 12)) + minutes_portion;
             let minute_angle = hand_rotation(now.minute() * 15 + now.second() / 4, 900);
-            let second_angle = hand_rotation_sec(seconds, 60.0).0;
+            let second_angle = hand_rotation_sec(seconds, 60.0);
 
             frame.translate(Vector::new(center.x, center.y));
 
@@ -4528,8 +4572,10 @@ impl MediaWidget {
         gc1: Color,
         gc2: Color,
         time: &'a DateTime<Local>,
+        seek_preview: Option<f32>,
     ) -> Element<'a, Message> {
-        self.style.view(media_metadata, theme, size, gc1, gc2, time)
+        self.style
+            .view(media_metadata, theme, size, gc1, gc2, time, seek_preview)
     }
 }
 
@@ -4553,10 +4599,13 @@ impl MediaStyle {
         gc1: Color,
         gc2: Color,
         time: &'a DateTime<Local>,
+        seek_preview: Option<f32>,
     ) -> Element<'a, Message> {
         match self {
-            MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size, time),
-            MediaStyle::MediaFull(m) => m.view(media_metadata, theme, size, gc1, gc2, time),
+            MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size, time, seek_preview),
+            MediaStyle::MediaFull(m) => {
+                m.view(media_metadata, theme, size, gc1, gc2, time, seek_preview)
+            }
             _ => unimplemented!(),
         }
     }
@@ -4584,6 +4633,7 @@ impl MediaWidgetHalf {
         theme: &'a Theme,
         size: Size,
         time: &'a DateTime<Local>,
+        seek_preview: Option<f32>,
     ) -> Element<'a, Message> {
         let s = size.width.min(size.height);
         let palette = theme.palette();
@@ -4721,23 +4771,19 @@ impl MediaWidgetHalf {
                     .color(palette.primary),
             ]
             .spacing(s * 0.02),
-            container(
-                iced::widget::progress_bar(
-                    0.0..=100.0,
-                    position_ms as f32 / (duration_ms as f32 / 100.0),
-                )
-                .style(move |_theme: &Theme| iced::widget::progress_bar::Style {
-                    background: iced::Background::Color(palette.danger),
-                    bar: iced::Background::Color(palette.text),
-                    border: iced::Border {
-                        radius: (s * 0.05).into(),
-                        ..Default::default()
-                    },
-                })
-            )
-            .height(Length::Fixed(s * 0.03))
+            canvas(SeekBar {
+                progress: if duration_ms > 0 {
+                    (position_ms as f32 / duration_ms as f32).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                },
+                preview: seek_preview,
+                bg_color: palette.danger,
+                bar_color: palette.text,
+                radius: s * 0.05,
+            })
             .width(Length::Fixed(s * 0.8))
-            .align_x(iced::Alignment::Center),
+            .height(Length::Fixed(s * 0.03)),
             timecode,
             container(controls)
                 .width(Length::Fixed(s * 0.8))
@@ -4775,6 +4821,7 @@ impl MediaWidgetFull {
         gc1: Color,
         gc2: Color,
         time: &'a DateTime<Local>,
+        seek_preview: Option<f32>,
     ) -> Element<'a, Message> {
         let s = size.height.min(size.width / 2.0);
         let palette = theme.palette();
@@ -4925,22 +4972,17 @@ impl MediaWidgetFull {
                 .width(Length::Fixed(s * 0.8))
                 .align_x(iced::Alignment::Center),
             column![
-                container(
-                    iced::widget::progress_bar(
-                        0.0..=100.0,
-                        position_ms as f32 / (duration_ms as f32 / 100.0),
-                    )
-                    .style(move |_theme: &Theme| {
-                        iced::widget::progress_bar::Style {
-                            background: iced::Background::Color(palette.danger),
-                            bar: iced::Background::Color(palette.text),
-                            border: iced::Border {
-                                radius: (s * 0.07).into(),
-                                ..Default::default()
-                            },
-                        }
-                    })
-                )
+                canvas(SeekBar {
+                    progress: if duration_ms > 0 {
+                        (position_ms as f32 / duration_ms as f32).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    },
+                    preview: seek_preview,
+                    bg_color: palette.danger,
+                    bar_color: palette.text,
+                    radius: s * 0.07,
+                })
                 .height(Length::Fixed(s * 0.04))
                 .width(Length::Fixed(s * 0.8)),
                 timecode
@@ -5172,4 +5214,96 @@ fn extract_dominant_colors(buf: &[u8], theme_name: &str) -> (Color, Color) {
 
 fn dist(a: &[f32; 3], b: &[f32; 3]) -> f32 {
     (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)
+}
+
+struct SeekBar {
+    progress: f32,
+    preview: Option<f32>,
+    bg_color: Color,
+    bar_color: Color,
+    radius: f32,
+}
+
+impl canvas::Program<Message> for SeekBar {
+    type State = bool;
+
+    fn update(
+        &self,
+        state: &mut bool,
+        event: &canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    *state = true;
+                    let ratio = (pos.x / bounds.width).clamp(0.0, 1.0);
+                    return Some(canvas::Action::publish(Message::SeekPreview(ratio)));
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if *state {
+                    if let Some(pos) = cursor.position_in(bounds) {
+                        let ratio = (pos.x / bounds.width).clamp(0.0, 1.0);
+
+                        return Some(canvas::Action::publish(Message::SeekPreview(ratio)));
+                    }
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if *state {
+                    *state = false;
+                    if let Some(pos) = cursor.position_in(bounds) {
+                        let ratio = (pos.x / bounds.width).clamp(0.0, 1.0);
+                        return Some(canvas::Action::publish(Message::SeekCommit(ratio)));
+                    }
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn draw(
+        &self,
+        _state: &bool,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let r = Radius::new(self.radius);
+
+        frame.fill(
+            &Path::rounded_rectangle(Point::ORIGIN, bounds.size(), r),
+            self.bg_color,
+        );
+
+        let progress = self.preview.unwrap_or(self.progress);
+        frame.fill(
+            &Path::rounded_rectangle(
+                Point::ORIGIN,
+                Size::new(bounds.width * progress, bounds.height),
+                r,
+            ),
+            self.bar_color,
+        );
+
+        vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &bool,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if *state {
+            mouse::Interaction::Grabbing
+        } else {
+            mouse::Interaction::Pointer
+        }
+    }
 }
