@@ -23,6 +23,7 @@ use reqwest;
 use serde::Deserialize;
 use std::cell::Cell;
 use std::time::{Duration, Instant};
+use volumecontrol;
 #[cfg(target_os = "windows")]
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
@@ -145,6 +146,8 @@ struct Application {
     now_playing: Option<media_remote::NowPlayingPerl>,
     media_metadata: Option<MediaMetadata>,
     seek_preview: Option<f32>,
+    volume: f32,
+    volume_preview: Option<f32>,
     main_window: Option<window::Id>,
     current_page: usize,
     page_width: f32,
@@ -185,6 +188,8 @@ enum Message {
     PreviousTrack,
     SeekPreview(f32),
     SeekCommit(f32),
+    VolumePreview(f32),
+    VolumeCommit(f32),
     None,
 }
 
@@ -532,6 +537,7 @@ impl Application {
                         let _ = tx.send(result);
                     });
                 });
+
                 Task::perform(
                     async move { rx.await.ok().flatten() },
                     Message::MetadataSave,
@@ -1102,6 +1108,26 @@ impl Application {
                 #[allow(unreachable_code)]
                 Task::none()
             }
+            Message::VolumePreview(v) => {
+                self.volume_preview = Some(v);
+                Task::none()
+            }
+            Message::VolumeCommit(v) => {
+                #[cfg(target_os = "windows")]
+                {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+
+                    std::thread::spawn(move || {
+                        if let Ok(device) = volumecontrol::AudioDevice::from_default() {
+                            let _ = device.set_vol((v * 100.0) as u8);
+                        }
+
+                        let _ = tx.send(());
+                    });
+                }
+
+                Task::none()
+            }
             Message::None => Task::none(),
         }
     }
@@ -1202,6 +1228,8 @@ impl Application {
                     *self.gradient_c1.value(),
                     *self.gradient_c2.value(),
                     self.seek_preview,
+                    self.volume_preview,
+                    self.volume,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1222,6 +1250,8 @@ impl Application {
                     *self.gradient_c1.value(),
                     *self.gradient_c2.value(),
                     self.seek_preview,
+                    self.volume_preview,
+                    self.volume,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1328,6 +1358,8 @@ impl Application {
                     *self.gradient_c1.value(),
                     *self.gradient_c2.value(),
                     self.seek_preview,
+                    self.volume_preview,
+                    self.volume,
                 ))
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
@@ -1418,6 +1450,8 @@ impl Default for Application {
             now_playing: None,
             media_metadata: None,
             seek_preview: None,
+            volume: 0.3,
+            volume_preview: None,
             fullscreen: true,
             fullscreen_btn_hover: Animated::new(
                 0.0f32,
@@ -1952,14 +1986,24 @@ impl AppWidget {
         gc1: Color,
         gc2: Color,
         seek_preview: Option<f32>,
+        volume_preview: Option<f32>,
+        volume: f32,
     ) -> Element<'a, Message> {
         match self {
             AppWidget::Clock(w) => w.view(time, weather, theme, size),
             AppWidget::Calendar(w) => w.view(time),
             AppWidget::Weather(w) => w.view(theme, time, weather, size),
-            AppWidget::Media(w) => {
-                w.view(media_metadata, theme, size, gc1, gc2, time, seek_preview)
-            }
+            AppWidget::Media(w) => w.view(
+                media_metadata,
+                theme,
+                size,
+                gc1,
+                gc2,
+                time,
+                seek_preview,
+                volume_preview,
+                volume,
+            ),
         }
     }
 
@@ -4573,9 +4617,20 @@ impl MediaWidget {
         gc2: Color,
         time: &'a DateTime<Local>,
         seek_preview: Option<f32>,
+        voluem_preview: Option<f32>,
+        volume: f32,
     ) -> Element<'a, Message> {
-        self.style
-            .view(media_metadata, theme, size, gc1, gc2, time, seek_preview)
+        self.style.view(
+            media_metadata,
+            theme,
+            size,
+            gc1,
+            gc2,
+            time,
+            seek_preview,
+            voluem_preview,
+            volume,
+        )
     }
 }
 
@@ -4600,12 +4655,30 @@ impl MediaStyle {
         gc2: Color,
         time: &'a DateTime<Local>,
         seek_preview: Option<f32>,
+        volume_preview: Option<f32>,
+        volume: f32,
     ) -> Element<'a, Message> {
         match self {
-            MediaStyle::MediaHalf(m) => m.view(media_metadata, theme, size, time, seek_preview),
-            MediaStyle::MediaFull(m) => {
-                m.view(media_metadata, theme, size, gc1, gc2, time, seek_preview)
-            }
+            MediaStyle::MediaHalf(m) => m.view(
+                media_metadata,
+                theme,
+                size,
+                time,
+                seek_preview,
+                volume_preview,
+                volume,
+            ),
+            MediaStyle::MediaFull(m) => m.view(
+                media_metadata,
+                theme,
+                size,
+                gc1,
+                gc2,
+                time,
+                seek_preview,
+                volume_preview,
+                volume,
+            ),
             _ => unimplemented!(),
         }
     }
@@ -4634,6 +4707,8 @@ impl MediaWidgetHalf {
         size: Size,
         time: &'a DateTime<Local>,
         seek_preview: Option<f32>,
+        volume_preview: Option<f32>,
+        volume: f32,
     ) -> Element<'a, Message> {
         let s = size.width.min(size.height);
         let palette = theme.palette();
@@ -4661,6 +4736,51 @@ impl MediaWidgetHalf {
                         ..Default::default()
                     })
             };
+        let vol = volume_preview.unwrap_or(volume);
+
+        let vol_icon = if vol == 0.0 {
+            include_bytes!("../icons/silent.svg").as_ref()
+        } else if vol < 0.33 {
+            include_bytes!("../icons/low-volume.svg").as_ref()
+        } else if vol < 0.66 {
+            include_bytes!("../icons/med-volume.svg").as_ref()
+        } else {
+            include_bytes!("../icons/full-volume.svg").as_ref()
+        };
+
+        let icon_size = s * 0.1;
+        let bar_w = s * 0.04;
+        let bar_h = s * 0.25;
+
+        let volume_control = column![
+            svg(svg::Handle::from_memory(vol_icon))
+                .style(move |_: &Theme, _| svg::Style {
+                    color: Some(palette.text),
+                    ..Default::default()
+                })
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size)),
+            canvas(VolumeBar {
+                progress: vol,
+                preview: volume_preview,
+                bg_color: palette.danger,
+                bar_color: palette.text,
+                radius: bar_w * 0.5,
+                orientation: Orientation::Vertical,
+            })
+            .width(Length::Fixed(bar_w))
+            .height(Length::Fixed(bar_h)),
+        ]
+        .spacing(s * 0.02)
+        .align_x(iced::Alignment::Center);
+
+        let top_row = row![
+            thumbnail,
+            iced::widget::Space::new().width(Length::Fill),
+            volume_control,
+        ]
+        .width(Length::Fixed(s * 0.8))
+        .align_y(iced::Alignment::Start);
 
         let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
             match media_metadata {
@@ -4759,7 +4879,8 @@ impl MediaWidgetHalf {
         .align_y(iced::Alignment::Center);
 
         let content = column![
-            thumbnail,
+            // thumbnail,
+            top_row,
             column![
                 text(title)
                     .size(s * 0.05)
@@ -4822,36 +4943,34 @@ impl MediaWidgetFull {
         gc2: Color,
         time: &'a DateTime<Local>,
         seek_preview: Option<f32>,
+        volume_preview: Option<f32>,
+        volume: f32,
     ) -> Element<'a, Message> {
         let s = size.height.min(size.width / 2.0);
         let palette = theme.palette();
 
-        let thumbnail =
-            if let Some(handle) = media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref()) {
-                container(
-                    iced::widget::image(handle.clone())
-                        .width(Length::Fixed(s))
-                        .height(Length::Fixed(s))
-                        .content_fit(iced::ContentFit::Contain),
-                )
+        let thumbnail = if let Some(handle) =
+            media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref())
+        {
+            container(
+                iced::widget::image(handle.clone())
+                    .width(Length::Fixed(s))
+                    .height(Length::Fixed(s))
+                    .content_fit(iced::ContentFit::Contain),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
+        } else {
+            let handle = svg::Handle::from_memory(include_bytes!("../icons/media-thumbnail.svg"));
+
+            container(svg(handle).width(Length::Fixed(s)).height(Length::Fixed(s)))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Center)
-            } else {
-                container(text(""))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .align_x(iced::Alignment::Center)
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
-                        border: iced::Border {
-                            radius: (s * 0.1).into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    })
-            };
+        };
 
         let (title, artist, is_playing, position, duration, position_ms, duration_ms) =
             match media_metadata {
@@ -4949,25 +5068,67 @@ impl MediaWidgetFull {
         .spacing(s * 0.12)
         .align_y(iced::Alignment::Center);
 
+        let vol = volume_preview.unwrap_or(volume);
+
+        let vol_icon = if vol == 0.0 {
+            include_bytes!("../icons/silent.svg").as_ref()
+        } else if vol < 0.33 {
+            include_bytes!("../icons/low-volume.svg").as_ref()
+        } else if vol < 0.66 {
+            include_bytes!("../icons/med-volume.svg").as_ref()
+        } else {
+            include_bytes!("../icons/full-volume.svg").as_ref()
+        };
+
+        let icon_size = s * 0.06;
+        let bar_w = s * 0.7;
+        let bar_h = s * 0.03;
+
+        let volume_control = row![
+            canvas(VolumeBar {
+                progress: vol,
+                preview: volume_preview,
+                bg_color: palette.danger,
+                bar_color: palette.text,
+                radius: bar_w * 0.5,
+                orientation: Orientation::Horizontal,
+            })
+            .width(Length::Fixed(bar_w))
+            .height(Length::Fixed(bar_h)),
+            svg(svg::Handle::from_memory(vol_icon))
+                .style(move |_: &Theme, _| svg::Style {
+                    color: Some(palette.text),
+                    ..Default::default()
+                })
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size)),
+        ]
+        .spacing(s * 0.02)
+        .align_y(iced::Alignment::Center);
+
         let content = column![
             column![
-                text(title)
-                    .size(s * 0.09)
-                    .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.text)
-                    .width(Length::Fixed(s * 0.8))
-                    .shaping(iced::widget::text::Shaping::Advanced)
-                    .wrapping(iced::widget::text::Wrapping::None),
-                text(artist)
-                    .size(s * 0.05)
-                    .font(SF_PRO_DISPLAY_BOLD)
-                    .color(palette.primary)
-                    .width(Length::Fixed(s * 0.8))
-                    .shaping(iced::widget::text::Shaping::Advanced)
-                    .wrapping(iced::widget::text::Wrapping::None),
+                volume_control,
+                column![
+                    text(title)
+                        .size(s * 0.09)
+                        .font(SF_PRO_DISPLAY_BOLD)
+                        .color(palette.text)
+                        .width(Length::Fixed(s * 0.8))
+                        .shaping(iced::widget::text::Shaping::Advanced)
+                        .wrapping(iced::widget::text::Wrapping::None),
+                    text(artist)
+                        .size(s * 0.05)
+                        .font(SF_PRO_DISPLAY_BOLD)
+                        .color(palette.primary)
+                        .width(Length::Fixed(s * 0.8))
+                        .shaping(iced::widget::text::Shaping::Advanced)
+                        .wrapping(iced::widget::text::Wrapping::None),
+                ]
+                .spacing(s * 0.008)
             ]
-            .align_x(iced::Alignment::Center)
-            .spacing(s * 0.008),
+            .align_x(iced::Alignment::Start)
+            .spacing(s * 0.02),
             container(controls)
                 .width(Length::Fixed(s * 0.8))
                 .align_x(iced::Alignment::Center),
@@ -5009,6 +5170,7 @@ impl MediaWidgetFull {
             w1 = w - r,
             r = r,
         );
+
         let corners = svg(svg::Handle::from_memory(svg_data.into_bytes()))
             .width(Length::Fill)
             .height(Length::Fill);
@@ -5257,6 +5419,8 @@ impl canvas::Program<Message> for SeekBar {
                     if let Some(pos) = cursor.position_in(bounds) {
                         let ratio = (pos.x / bounds.width).clamp(0.0, 1.0);
                         return Some(canvas::Action::publish(Message::SeekCommit(ratio)));
+                    } else {
+                        return Some(canvas::Action::publish(Message::SeekCommit(self.progress)));
                     }
                 }
             }
@@ -5297,13 +5461,143 @@ impl canvas::Program<Message> for SeekBar {
     fn mouse_interaction(
         &self,
         state: &bool,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
     ) -> mouse::Interaction {
         if *state {
             mouse::Interaction::Grabbing
-        } else {
+        } else if cursor.is_over(bounds) {
             mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
         }
+    }
+}
+
+enum Orientation {
+    Vertical,
+    Horizontal,
+}
+
+struct VolumeBar {
+    progress: f32,
+    preview: Option<f32>,
+    bg_color: Color,
+    bar_color: Color,
+    radius: f32,
+    orientation: Orientation,
+}
+
+impl canvas::Program<Message> for VolumeBar {
+    type State = bool;
+
+    fn update(
+        &self,
+        state: &mut bool,
+        event: &canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    *state = true;
+                    let ratio = calc_ratio(&self.orientation, pos, bounds);
+                    return Some(canvas::Action::publish(Message::VolumePreview(ratio)));
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if *state {
+                    if let Some(pos) = cursor.position_in(bounds) {
+                        let ratio = calc_ratio(&self.orientation, pos, bounds);
+                        return Some(canvas::Action::publish(Message::VolumePreview(ratio)));
+                    }
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if *state {
+                    *state = false;
+                    let ratio = if let Some(pos) = cursor.position_in(bounds) {
+                        calc_ratio(&self.orientation, pos, bounds)
+                    } else {
+                        self.preview.unwrap_or(self.progress)
+                    };
+                    return Some(canvas::Action::publish(Message::VolumeCommit(ratio)));
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn draw(
+        &self,
+        _state: &bool,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let r = Radius::new(self.radius);
+        let progress = self.preview.unwrap_or(self.progress);
+
+        match self.orientation {
+            Orientation::Vertical => {
+                let filled_h = bounds.height * progress;
+
+                frame.fill(
+                    &Path::rounded_rectangle(Point::ORIGIN, bounds.size(), r),
+                    self.bg_color,
+                );
+
+                frame.fill(
+                    &Path::rounded_rectangle(
+                        Point::new(0.0, bounds.height - filled_h),
+                        Size::new(bounds.width, filled_h),
+                        r,
+                    ),
+                    self.bar_color,
+                );
+                return vec![frame.into_geometry()];
+            }
+
+            Orientation::Horizontal => {
+                let filled_w = bounds.width * progress;
+
+                frame.fill(
+                    &Path::rounded_rectangle(Point::ORIGIN, bounds.size(), r),
+                    self.bg_color,
+                );
+
+                frame.fill(
+                    &Path::rounded_rectangle(Point::ORIGIN, Size::new(filled_w, bounds.height), r),
+                    self.bar_color,
+                );
+                return vec![frame.into_geometry()];
+            }
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &bool,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if *state {
+            mouse::Interaction::Grabbing
+        } else if cursor.is_over(bounds) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+}
+
+fn calc_ratio(orientation: &Orientation, pos: Point, bounds: Rectangle) -> f32 {
+    match orientation {
+        Orientation::Vertical => 1.0 - (pos.y / bounds.height * 1.05).clamp(0.0, 1.0),
+        Orientation::Horizontal => (pos.x / bounds.width * 1.05).clamp(0.0, 1.0),
     }
 }
