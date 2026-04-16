@@ -138,6 +138,7 @@ struct Application {
     fullscreen: bool,
     fullscreen_btn_hover: Animated<f32>,
     theme_btn_hover: Animated<f32>,
+    settings_btn_hover: Animated<f32>,
     #[cfg(target_os = "windows")]
     playerctl: Option<GlobalSystemMediaTransportControlsSessionManager>,
     #[cfg(target_os = "windows")]
@@ -149,6 +150,7 @@ struct Application {
     volume: f32,
     volume_preview: Option<f32>,
     main_window: Option<window::Id>,
+    settings_window: Option<window::Id>,
     current_page: usize,
     page_width: f32,
     drag: DragState,
@@ -168,8 +170,12 @@ enum Message {
     AnimateTheme(iced_anim::Event<Theme>),
     ThemeBtnHover(bool),
     FullscreenBtnHover(bool),
+    SettingsBtnHover(bool),
+    OpenSettings,
+    CloseSettings,
     AnimateThemeBtn(iced_anim::Event<f32>),
     AnimateFullscreenBtn(iced_anim::Event<f32>),
+    AnimateSettingsBtn(iced_anim::Event<f32>),
     ToggleFullscreen,
     DragDelta(f32),
     SnapTick(Instant),
@@ -813,12 +819,21 @@ impl Application {
                     .set_target(if hovered { 1.0 } else { 0.0 });
                 Task::none()
             }
+            Message::SettingsBtnHover(hovered) => {
+                self.settings_btn_hover
+                    .set_target(if hovered { 1.0 } else { 0.0 });
+                Task::none()
+            }
             Message::AnimateThemeBtn(e) => {
                 self.theme_btn_hover.update(e);
                 Task::none()
             }
             Message::AnimateFullscreenBtn(e) => {
                 self.fullscreen_btn_hover.update(e);
+                Task::none()
+            }
+            Message::AnimateSettingsBtn(e) => {
+                self.settings_btn_hover.update(e);
                 Task::none()
             }
             Message::DragDelta(dx) => {
@@ -1128,6 +1143,29 @@ impl Application {
 
                 Task::none()
             }
+            Message::OpenSettings => {
+                if self.settings_window.is_some() {
+                    return Task::none();
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: Size::new(720.0, 500.0),
+                    position: window::Position::Centered,
+                    decorations: true,
+                    level: window::Level::AlwaysOnTop,
+                    resizable: false,
+                    minimizable: false,
+                    ..Default::default()
+                });
+                self.settings_window = Some(id);
+                task.map(move |_| Message::None)
+            }
+            Message::CloseSettings => {
+                if let Some(id) = self.settings_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
+            }
             Message::None => Task::none(),
         }
     }
@@ -1149,63 +1187,80 @@ impl Application {
         Subscription::batch([clock, weather, metadata_update, snap_idle, anim])
     }
 
-    fn view(&self, _id: Id) -> Element<'_, Message> {
-        match self.main_window {
-            Some(_id) => Animation::new(
+    fn view(&self, id: Id) -> Element<'_, Message> {
+        if Some(id) == self.main_window {
+            Animation::new(
                 &self.theme,
                 Animation::new(
                     &self.theme_btn_hover,
                     Animation::new(
                         &self.fullscreen_btn_hover,
                         Animation::new(
-                            &self.gradient_c1,
+                            &self.settings_btn_hover,
                             Animation::new(
-                                &self.gradient_c2,
-                                responsive(move |size| {
-                                    let total_offset: f32 = match &self.drag {
-                                        DragState::Idle => -(self.current_page as f32) * size.width,
-                                        DragState::Active { offset_px, .. } => {
-                                            -(self.current_page as f32) * size.width + offset_px
-                                        }
-                                        DragState::Snapping {
-                                            start_offset,
-                                            end_offset,
-                                            velocity,
-                                            started_at,
-                                        } => {
-                                            let elapsed = started_at.elapsed().as_secs_f32();
-                                            let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0))
-                                                .min(1.0);
-                                            let dist = end_offset - start_offset;
-                                            let v0 = if dist.abs() > 0.001 {
-                                                velocity / dist
-                                            } else {
-                                                0.0
-                                            };
-                                            start_offset + dist * ease_spring(t, v0)
-                                        }
-                                    };
+                                &self.gradient_c1,
+                                Animation::new(
+                                    &self.gradient_c2,
+                                    responsive(move |size| {
+                                        let total_offset: f32 = match &self.drag {
+                                            DragState::Idle => {
+                                                -(self.current_page as f32) * size.width
+                                            }
+                                            DragState::Active { offset_px, .. } => {
+                                                -(self.current_page as f32) * size.width + offset_px
+                                            }
+                                            DragState::Snapping {
+                                                start_offset,
+                                                end_offset,
+                                                velocity,
+                                                started_at,
+                                            } => {
+                                                let elapsed = started_at.elapsed().as_secs_f32();
+                                                let t = (elapsed
+                                                    / (SNAP_DURATION_MS as f32 / 1000.0))
+                                                    .min(1.0);
+                                                let dist = end_offset - start_offset;
+                                                let v0 = if dist.abs() > 0.001 {
+                                                    velocity / dist
+                                                } else {
+                                                    0.0
+                                                };
+                                                start_offset + dist * ease_spring(t, v0)
+                                            }
+                                        };
 
-                                    slide_pages(
-                                        total_offset,
-                                        size.width,
-                                        size.height,
-                                        self.page0(size),
-                                        self.page1(size),
-                                    )
-                                }),
+                                        slide_pages(
+                                            total_offset,
+                                            size.width,
+                                            size.height,
+                                            self.page0(size),
+                                            self.page1(size),
+                                        )
+                                    }),
+                                )
+                                .on_update(Message::AnimateGradientC2),
                             )
-                            .on_update(Message::AnimateGradientC2),
+                            .on_update(Message::AnimateGradientC1),
                         )
-                        .on_update(Message::AnimateGradientC1),
+                        .on_update(Message::AnimateSettingsBtn),
                     )
                     .on_update(Message::AnimateFullscreenBtn),
                 )
                 .on_update(Message::AnimateThemeBtn),
             )
             .on_update(Message::AnimateTheme)
-            .into(),
-            None => container(text("window is closed")).into(),
+            .into()
+        } else if Some(id) == self.settings_window {
+            container(text("Settings").size(40))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgb8(23, 23, 23))),
+                    ..Default::default()
+                })
+                .into()
+        } else {
+            container(text("window is closed")).into()
         }
     }
 
@@ -1280,6 +1335,14 @@ impl Application {
             a: 1.0,
         };
 
+        let t_settings = *self.settings_btn_hover.value();
+        let settings_btn_color = Color {
+            r: primary.r * t_settings + 0.0 * (1.0 - t_settings),
+            g: primary.g * t_settings + 0.0 * (1.0 - t_settings),
+            b: primary.b * t_settings + 0.0 * (1.0 - t_settings),
+            a: 1.0,
+        };
+
         container(stack![
             row![left, right],
             container(
@@ -1337,7 +1400,34 @@ impl Application {
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Alignment::End)
-            .align_y(Alignment::Start)
+            .align_y(Alignment::Start),
+            container(
+                iced::widget::mouse_area(
+                    button(
+                        svg(svg::Handle::from_memory(include_bytes!(
+                            "../icons/settings.svg"
+                        )))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: Some(settings_btn_color),
+                            ..Default::default()
+                        })
+                        .width(Length::Fixed(sw.min(sh) * 0.1 * t_settings.max(0.3)))
+                        .height(Length::Fixed(sw.min(sh) * 0.1 * t_settings.max(0.3))),
+                    )
+                    .style(|_, _| button::Style {
+                        background: None,
+                        ..Default::default()
+                    })
+                    .on_press(Message::OpenSettings)
+                )
+                .on_enter(Message::SettingsBtnHover(true))
+                .on_exit(Message::SettingsBtnHover(false)),
+            )
+            .padding(Padding::new(sw.min(sh) * 0.03))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Start)
+            .align_y(Alignment::End),
         ])
         .width(Length::Fixed(size.width))
         .height(Length::Fixed(size.height))
@@ -1461,7 +1551,12 @@ impl Default for Application {
                 0.0f32,
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
             ),
+            settings_btn_hover: Animated::new(
+                0.0f32,
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
             main_window: None,
+            settings_window: None,
             current_page: 0,
             page_width: 800.0,
             drag: DragState::Idle,
@@ -4713,29 +4808,25 @@ impl MediaWidgetHalf {
         let s = size.width.min(size.height);
         let palette = theme.palette();
 
-        let thumbnail =
-            if let Some(handle) = media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref()) {
-                container(
-                    iced::widget::image(handle.clone())
-                        .width(Length::Fixed(s * 0.35))
-                        .height(Length::Fixed(s * 0.35))
-                        .content_fit(iced::ContentFit::ScaleDown),
-                )
-                .width(Length::Fixed(s * 0.35))
-                .height(Length::Fixed(s * 0.35))
-            } else {
-                container(text(""))
+        let thumbnail = if let Some(handle) =
+            media_metadata.as_ref().and_then(|m| m.thumbnail.as_ref())
+        {
+            container(
+                iced::widget::image(handle.clone())
                     .width(Length::Fixed(s * 0.35))
                     .height(Length::Fixed(s * 0.35))
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
-                        border: iced::Border {
-                            radius: (s * 0.1).into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    })
-            };
+                    .content_fit(iced::ContentFit::ScaleDown),
+            )
+            .width(Length::Fixed(s * 0.35))
+            .height(Length::Fixed(s * 0.35))
+        } else {
+            let handle = svg::Handle::from_memory(include_bytes!("../icons/media-thumbnail.svg"));
+
+            container(svg(handle).width(Length::Fixed(s)).height(Length::Fixed(s)))
+                .width(Length::Fixed(s * 0.35))
+                .height(Length::Fixed(s * 0.35))
+        };
+
         let vol = volume_preview.unwrap_or(volume);
 
         let vol_icon = if vol == 0.0 {
@@ -4879,7 +4970,6 @@ impl MediaWidgetHalf {
         .align_y(iced::Alignment::Center);
 
         let content = column![
-            // thumbnail,
             top_row,
             column![
                 text(title)
