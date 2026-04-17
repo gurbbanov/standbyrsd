@@ -1123,6 +1123,37 @@ impl Application {
                         |_| Message::UpdateMetadata,
                     );
                 }
+                #[cfg(target_os = "linux")]
+                {
+                    let duration_us = self
+                        .media_metadata
+                        .as_ref()
+                        .map(|m| m.duration)
+                        .unwrap_or(0)
+                        / 10;
+
+                    let target_us = (ratio * duration_us as f32) as i64;
+
+                    return Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                let finder = mpris::PlayerFinder::new().ok()?;
+                                let player = finder.find_active().ok()?;
+
+                                let current_us = player.get_position().ok()?.as_micros() as i64;
+                                let delta_us = target_us - current_us;
+
+                                player.seek(delta_us).ok()?;
+                                Some(())
+                            })
+                            .await
+                            .ok()
+                            .flatten()
+                        },
+                        |_| Message::UpdateMetadata,
+                    );
+                }
+
                 #[allow(unreachable_code)]
                 Task::none()
             }
@@ -1131,7 +1162,6 @@ impl Application {
                 Task::none()
             }
             Message::VolumeCommit(v) => {
-                #[cfg(target_os = "windows")]
                 {
                     let (tx, rx) = tokio::sync::oneshot::channel();
 
