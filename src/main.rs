@@ -1153,27 +1153,47 @@ impl Application {
                         |_| Message::UpdateMetadata,
                     );
                 }
-
-                #[allow(unreachable_code)]
-                Task::none()
+                #[cfg(target_os = "macos")]
+                {
+                    let duration = self
+                        .media_metadata
+                        .as_ref()
+                        .map(|m| m.duration)
+                        .unwrap_or(0);
+                    let target_secs = ratio as f64 * duration as f64 / 10_000_000.0;
+                    return Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                media_remote::set_elapsed_time(target_secs);
+                            })
+                            .await
+                            .ok();
+                        },
+                        |_| Message::UpdateMetadata,
+                    );
+                }
             }
             Message::VolumePreview(v) => {
                 self.volume_preview = Some(v);
                 Task::none()
             }
             Message::VolumeCommit(v) => {
-                {
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-
-                    std::thread::spawn(move || {
-                        if let Ok(device) = volumecontrol::AudioDevice::from_default() {
-                            let _ = device.set_vol((v * 100.0) as u8);
+                std::thread::spawn(move || {
+                    if let Ok(device) = volumecontrol::AudioDevice::from_default() {
+                        if device.set_vol((v * 100.0) as u8).is_ok() {
+                            return;
                         }
-
-                        let _ = tx.send(());
-                    });
-                }
-
+                    }
+                    #[cfg(target_os = "macos")]
+                    {
+                        let vol = (v * 100.0) as u8;
+                        std::process::Command::new("osascript")
+                            .arg("-e")
+                            .arg(format!("set volume output volume {vol}"))
+                            .output()
+                            .ok();
+                    }
+                });
                 Task::none()
             }
             Message::OpenSettings => {
@@ -1682,7 +1702,7 @@ impl Default for Application {
             ),
             main_window: None,
             settings_open: false,
-            smooth_tick: false,
+            smooth_tick: true,
             current_page: 0,
             page_width: 800.0,
             drag: DragState::Idle,
