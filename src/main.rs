@@ -75,11 +75,7 @@ pub fn main() -> iced::Result {
                 include_bytes!("../fonts/SF-Pro-Display-Bold.otf").into(),
                 include_bytes!("../fonts/SF-Pro-Condensed.ttf").into(),
             ],
-            default_font: Font {
-                family: Family::Name("SF Pro Rounded"),
-                weight: Weight::Black,
-                ..Font::DEFAULT
-            },
+            default_font: SF_PRO_DISPLAY_BOLD,
             ..Settings::default()
         })
         .theme(Application::theme)
@@ -150,7 +146,8 @@ struct Application {
     volume: f32,
     volume_preview: Option<f32>,
     main_window: Option<window::Id>,
-    settings_window: Option<window::Id>,
+    settings_open: bool,
+    smooth_tick: bool,
     current_page: usize,
     page_width: f32,
     drag: DragState,
@@ -177,6 +174,7 @@ enum Message {
     AnimateFullscreenBtn(iced_anim::Event<f32>),
     AnimateSettingsBtn(iced_anim::Event<f32>),
     ToggleFullscreen,
+    ToggleSmoothTick(bool),
     DragDelta(f32),
     SnapTick(Instant),
     AnimTick(Instant),
@@ -808,6 +806,11 @@ impl Application {
                     Task::none()
                 }
             }
+            Message::ToggleSmoothTick(b) => {
+                self.smooth_tick = b;
+
+                Task::none()
+            }
             Message::ThemeBtnHover(hovered) => {
                 self.theme_btn_hover
                     .set_target(if hovered { 1.0 } else { 0.0 });
@@ -1144,34 +1147,26 @@ impl Application {
                 Task::none()
             }
             Message::OpenSettings => {
-                if self.settings_window.is_some() {
-                    return Task::none();
-                }
-                let (id, task) = window::open(window::Settings {
-                    size: Size::new(720.0, 500.0),
-                    position: window::Position::Centered,
-                    decorations: true,
-                    level: window::Level::AlwaysOnTop,
-                    resizable: false,
-                    minimizable: false,
-                    ..Default::default()
-                });
-                self.settings_window = Some(id);
-                task.map(move |_| Message::None)
+                self.settings_open = true;
+
+                Task::none()
             }
             Message::CloseSettings => {
-                if let Some(id) = self.settings_window.take() {
-                    window::close(id)
-                } else {
-                    Task::none()
-                }
+                self.settings_open = false;
+
+                Task::none()
             }
             Message::None => Task::none(),
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let clock = time::every(milliseconds(16)).map(|_| Message::Tick(chrono::Local::now()));
+        let clock = time::every(if self.smooth_tick {
+            milliseconds(16)
+        } else {
+            seconds(1)
+        })
+        .map(|_| Message::Tick(chrono::Local::now()));
         let weather = time::every(seconds(600)).map(|_| Message::FetchWeather);
         let metadata_update = time::every(seconds(1)).map(|_| Message::UpdateMetadata);
         let snap_idle = if matches!(self.drag, DragState::Active { .. }) {
@@ -1189,7 +1184,7 @@ impl Application {
 
     fn view(&self, id: Id) -> Element<'_, Message> {
         if Some(id) == self.main_window {
-            Animation::new(
+            let main_window = Animation::new(
                 &self.theme,
                 Animation::new(
                     &self.theme_btn_hover,
@@ -1248,17 +1243,114 @@ impl Application {
                 )
                 .on_update(Message::AnimateThemeBtn),
             )
-            .on_update(Message::AnimateTheme)
-            .into()
-        } else if Some(id) == self.settings_window {
-            container(text("Settings").size(40))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(|_| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb8(23, 23, 23))),
-                    ..Default::default()
-                })
+            .on_update(Message::AnimateTheme);
+
+            if self.settings_open {
+                stack![
+                    main_window,
+                    iced::widget::mouse_area(
+                        container(
+                            iced::widget::mouse_area(responsive(move |s| {
+                                let mn = s.height.min(s.width);
+                                container(
+                                    container(
+                                        column![
+                                            row![
+                                                container(text("settings").size(mn * 0.05))
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                container(
+                                                    button(
+                                                        container("")
+                                                            .width(Length::Fixed(14.0))
+                                                            .height(Length::Fixed(14.0))
+                                                    )
+                                                    .on_press(Message::CloseSettings)
+                                                    .width(Length::Fixed(20.0))
+                                                    .height(Length::Fixed(20.0))
+                                                    .padding(0)
+                                                    .style(|_, status| {
+                                                        let color = match status {
+                                                            button::Status::Hovered => {
+                                                                Color::from_rgb8(255, 80, 80)
+                                                            }
+                                                            _ => Color::from_rgb8(220, 50, 50),
+                                                        };
+
+                                                        button::Style {
+                                                            background: Some(
+                                                                iced::Background::Color(color),
+                                                            ),
+                                                            border: iced::Border {
+                                                                radius: 10.0.into(),
+                                                                ..Default::default()
+                                                            },
+                                                            ..Default::default()
+                                                        }
+                                                    })
+                                                )
+                                                .width(Length::Shrink)
+                                                .align_x(iced::Alignment::End),
+                                            ]
+                                            .width(Length::Fill),
+                                            row![
+                                                container(text("smooth tick").size(mn * 0.022))
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                container(
+                                                    iced::widget::toggler(self.smooth_tick)
+                                                        .size(mn * 0.025)
+                                                        .on_toggle(Message::ToggleSmoothTick)
+                                                )
+                                                .align_x(iced::Alignment::End)
+                                            ]
+                                        ]
+                                        .width(Length::Fill)
+                                        .height(Length::Fill)
+                                        .spacing(s.height * 0.05),
+                                    )
+                                    .padding(mn * 0.015)
+                                    .width(Length::Fixed(mn * 0.7))
+                                    .height(Length::Fixed(mn * 0.4))
+                                    .style(move |_| {
+                                        container::Style {
+                                            background: Some(iced::Background::Color(
+                                                Color::from_rgb8(23, 23, 23),
+                                            )),
+                                            border: iced::Border {
+                                                radius: (mn * 0.015).into(),
+                                                ..Default::default()
+                                            },
+                                            ..Default::default()
+                                        }
+                                    }),
+                                )
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .align_x(iced::Alignment::Center)
+                                .align_y(iced::Alignment::Center)
+                                .into()
+                            }))
+                            .on_press(Message::None)
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(iced::Alignment::Center)
+                        .align_y(iced::Alignment::Center)
+                        .style(|_| container::Style {
+                            background: Some(iced::Background::Color(Color::from_rgba(
+                                0.0, 0.0, 0.0, 0.5
+                            ))),
+                            ..Default::default()
+                        }),
+                    )
+                    .on_press(Message::None)
+                    .on_scroll(|_| Message::None)
+                ]
                 .into()
+            } else {
+                main_window.into()
+            }
         } else {
             container(text("window is closed")).into()
         }
@@ -1285,6 +1377,7 @@ impl Application {
                     self.seek_preview,
                     self.volume_preview,
                     self.volume,
+                    self.smooth_tick,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1307,6 +1400,7 @@ impl Application {
                     self.seek_preview,
                     self.volume_preview,
                     self.volume,
+                    self.smooth_tick,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1450,6 +1544,7 @@ impl Application {
                     self.seek_preview,
                     self.volume_preview,
                     self.volume,
+                    self.smooth_tick,
                 ))
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
@@ -1556,7 +1651,8 @@ impl Default for Application {
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
             ),
             main_window: None,
-            settings_window: None,
+            settings_open: false,
+            smooth_tick: false,
             current_page: 0,
             page_width: 800.0,
             drag: DragState::Idle,
@@ -2083,9 +2179,10 @@ impl AppWidget {
         seek_preview: Option<f32>,
         volume_preview: Option<f32>,
         volume: f32,
+        smooth_tick: bool,
     ) -> Element<'a, Message> {
         match self {
-            AppWidget::Clock(w) => w.view(time, weather, theme, size),
+            AppWidget::Clock(w) => w.view(time, weather, theme, size, smooth_tick),
             AppWidget::Calendar(w) => w.view(time),
             AppWidget::Weather(w) => w.view(theme, time, weather, size),
             AppWidget::Media(w) => w.view(
@@ -2402,8 +2499,9 @@ impl ClockWidget {
         weather: &'a WeatherStatus,
         theme: &'a Theme,
         size: Size,
+        smooth_tick: bool,
     ) -> Element<'a, Message> {
-        self.style.view(time, weather, theme, size)
+        self.style.view(time, weather, theme, size, smooth_tick)
     }
 }
 
@@ -2429,13 +2527,14 @@ impl ClockStyle {
         weather: &'a WeatherStatus,
         theme: &'a Theme,
         size: Size,
+        smooth_tick: bool,
     ) -> Element<'a, Message> {
         match self {
             ClockStyle::DigitalHalf(clock) => clock.view(time),
-            ClockStyle::AnalogueHalf(clock) => clock.view(time),
-            ClockStyle::MinimalHalf(clock) => clock.view(time),
-            ClockStyle::AnalogueRectHalf(clock) => clock.view(time),
-            ClockStyle::AnalogueRectFull(clock) => clock.view(time),
+            ClockStyle::AnalogueHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::MinimalHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::AnalogueRectHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::AnalogueRectFull(clock) => clock.view(time, smooth_tick),
             ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size),
         }
     }
@@ -2619,8 +2718,8 @@ struct AnalogueClockHalf {
 }
 
 impl AnalogueClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        stack![self.clock_frame.view(), self.hands.view(time)].into()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
+        stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)].into()
     }
 }
 
@@ -2636,17 +2735,17 @@ struct Hands {
 }
 
 impl Hands {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
         self.cache.clear();
 
-        canvas((self, time))
+        canvas((self, time, smooth_tick))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>, bool) {
     type State = ();
 
     fn draw(
@@ -2658,12 +2757,16 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let palette = theme.palette();
-        let (widget, now) = self;
+        let (widget, now, smooth_tick) = self;
 
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let center = frame.center();
             let radius = frame.width().min(frame.height()) / 2.3;
-            let seconds = now.second() as f32 + now.nanosecond() as f32 / 1_000_000_000.0;
+            let seconds = if *smooth_tick {
+                now.second() as f32 + now.nanosecond() as f32 / 1_000_000_000.0
+            } else {
+                now.second() as f32
+            };
             let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
             let hour_hand_angle = Radians::from(hand_rotation(now.hour(), 12)) + minutes_portion;
             let minute_angle = hand_rotation(now.minute() * 15 + now.second() / 4, 900);
@@ -2893,6 +2996,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>) {
                 );
             });
         });
+
         vec![dynamic_layer]
     }
 }
@@ -2929,7 +3033,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
 
             frame.translate(Vector::new(center.x, center.y));
 
-            let radius = frame.width().min(frame.height()) / 2.5;
+            let radius = frame.width().min(frame.height()) / 2.3;
 
             for hour in 1..=12 {
                 let angle = Radians::from(hand_rotation(hour, 12)) - Radians::from(Degrees(90.0));
@@ -2940,7 +3044,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
                 frame.fill_text(canvas::Text {
                     content: format!("{hour}"),
                     size: (radius / 4.5).into(),
-                    position: Point::new(x * 0.8, y * 0.8),
+                    position: Point::new(x * 0.75, y * 0.75),
                     color: palette.text,
                     align_x: text::Alignment::Center,
                     align_y: alignment::Vertical::Center,
@@ -2960,12 +3064,11 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
                     color = palette.danger;
                     radius * 0.016
                 };
-
                 frame.with_save(|frame| {
                     frame.rotate(angle);
                     frame.fill(
                         &Path::rounded_rectangle(
-                            Point::new(0.0, radius),
+                            Point::new(-width / 2.0, radius - width * 6.0),
                             Size::new(width, width * 6.0),
                             Radius::new(width / 2.0),
                         ),
@@ -2986,8 +3089,8 @@ struct MinimalClockHalf {
 }
 
 impl MinimalClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        stack![self.clock_frame.view(), self.hands.view(time)].into()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
+        stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)].into()
     }
 }
 
@@ -3061,8 +3164,8 @@ struct AnalogueRectClockHalf {
 }
 
 impl AnalogueRectClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        stack![self.clock_frame.view(), self.hands.view(time)].into()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
+        stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)].into()
     }
 }
 
@@ -3346,8 +3449,12 @@ struct AnalogueRectClockFull {
 }
 
 impl AnalogueRectClockFull {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        stack![self.clock_frame.view(time), self.hands.view(time)].into()
+    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
+        stack![
+            self.clock_frame.view(time),
+            self.hands.view(time, smooth_tick)
+        ]
+        .into()
     }
 }
 
