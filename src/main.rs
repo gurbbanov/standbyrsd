@@ -36,9 +36,9 @@ const SF_PRO_EXPANDED_BOLD: Font = Font {
     style: Style::Normal,
 };
 
-const SF_PRO_CONDENSED_EXTRABOLD: Font = Font {
+const SF_PRO_COMPRESSED_SEMIBOLD: Font = Font {
     family: Family::Name("SF Pro"),
-    weight: Weight::ExtraBold,
+    weight: Weight::Bold,
     stretch: Stretch::Condensed,
     style: Style::Normal,
 };
@@ -73,7 +73,7 @@ pub fn main() -> iced::Result {
                 include_bytes!("../fonts/SF-Pro-Expanded.ttf").into(),
                 include_bytes!("../fonts/SF-Pro-Display-Black.otf").into(),
                 include_bytes!("../fonts/SF-Pro-Display-Bold.otf").into(),
-                include_bytes!("../fonts/SF-Pro-Condensed.ttf").into(),
+                include_bytes!("../fonts/SF-Pro-Compressed.ttf").into(),
             ],
             default_font: SF_PRO_DISPLAY_BOLD,
             ..Settings::default()
@@ -2708,7 +2708,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 }
             });
 
-            let font_size = s * 0.4;
+            let font_size = s * 0.5;
 
             // часы
             frame.fill_text(canvas::Text {
@@ -2719,7 +2719,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 },
                 size: font_size.into(),
                 color: palette.text,
-                font: SF_PRO_CONDENSED_EXTRABOLD,
+                font: SF_PRO_COMPRESSED_SEMIBOLD,
                 align_x: text::Alignment::Right,
                 align_y: alignment::Vertical::Center,
                 ..Default::default()
@@ -2735,7 +2735,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 },
                 size: (font_size * 1.1).into(),
                 color: palette.danger,
-                font: SF_PRO_CONDENSED_EXTRABOLD,
+                font: SF_PRO_COMPRESSED_SEMIBOLD,
                 align_x: text::Alignment::Center,
                 align_y: alignment::Vertical::Center,
                 ..Default::default()
@@ -2750,7 +2750,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 },
                 size: font_size.into(),
                 color: palette.text,
-                font: SF_PRO_CONDENSED_EXTRABOLD,
+                font: SF_PRO_COMPRESSED_SEMIBOLD,
                 align_x: text::Alignment::Left,
                 align_y: alignment::Vertical::Center,
                 ..Default::default()
