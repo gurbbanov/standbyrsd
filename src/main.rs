@@ -2708,7 +2708,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 }
             });
 
-            let font_size = s * 0.5;
+            let font_size = s * 0.47;
 
             // часы
             frame.fill_text(canvas::Text {
@@ -4106,7 +4106,11 @@ impl MinimalForecastHalf {
                 if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
                     svg(svg::Handle::from_memory(wmo_code_svg(100)))
                         .style(move |_theme: &Theme, _status| svg::Style {
-                            color: Some(theme.palette().primary),
+                            color: if theme.name() == "red_dark" {
+                                Some(theme.palette().primary)
+                            } else {
+                                None
+                            },
                         })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
@@ -4114,7 +4118,11 @@ impl MinimalForecastHalf {
                 } else {
                     svg(svg::Handle::from_memory(wmo_code_svg(code)))
                         .style(move |_theme: &Theme, _status| svg::Style {
-                            color: Some(theme.palette().primary),
+                            color: if theme.name() == "red_dark" {
+                                Some(theme.palette().primary)
+                            } else {
+                                None
+                            },
                         })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
@@ -4278,16 +4286,24 @@ impl DetailedForecastHalf {
                 let code = w_data.current.as_ref().unwrap().weather_code;
                 if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
                     svg(svg::Handle::from_memory(wmo_code_svg(100)))
-                        .style(move |_theme: &Theme, _status| svg::Style {
-                            color: Some(theme.palette().primary),
+                        .style(move |theme: &Theme, _status| svg::Style {
+                            color: if theme.name() == "red_dark" {
+                                Some(theme.palette().primary)
+                            } else {
+                                None
+                            },
                         })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
                 } else {
                     svg(svg::Handle::from_memory(wmo_code_svg(code)))
-                        .style(move |_theme: &Theme, _status| svg::Style {
-                            color: Some(theme.palette().primary),
+                        .style(move |theme: &Theme, _status| svg::Style {
+                            color: if theme.name() == "red_dark" {
+                                Some(theme.palette().primary)
+                            } else {
+                                None
+                            },
                         })
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
@@ -4581,7 +4597,11 @@ impl DailyForecastHalf {
 
                 let current_icon = svg(svg::Handle::from_memory(wmo_code_svg(code)))
                     .style(move |_theme: &Theme, _status| svg::Style {
-                        color: Some(theme.palette().primary),
+                        color: if theme.name() == "red_dark" {
+                            Some(theme.palette().primary)
+                        } else {
+                            None
+                        },
                     })
                     .width(Length::Fixed(icon_size))
                     .height(Length::Fixed(icon_size))
@@ -4595,7 +4615,11 @@ impl DailyForecastHalf {
                         .map(|code| {
                             svg(svg::Handle::from_memory(wmo_code_svg(code)))
                                 .style(move |_theme: &Theme, _status| svg::Style {
-                                    color: Some(theme.palette().primary),
+                                    color: if theme.name() == "red_dark" {
+                                        Some(theme.palette().primary)
+                                    } else {
+                                        None
+                                    },
                                 })
                                 .width(Length::Fixed(icon_size * 1.3))
                                 .height(Length::Fixed(icon_size * 1.3))
@@ -5132,9 +5156,15 @@ impl MediaWidgetHalf {
                 text(title)
                     .size(s * 0.05)
                     .font(SF_PRO_DISPLAY_BOLD)
+                    .width(Length::Fixed(s * 0.4))
+                    .shaping(iced::widget::text::Shaping::Advanced)
+                    .wrapping(iced::widget::text::Wrapping::None)
                     .color(palette.text),
                 text(artist)
                     .size(s * 0.03)
+                    .width(Length::Fixed(s * 0.4))
+                    .shaping(iced::widget::text::Shaping::Advanced)
+                    .wrapping(iced::widget::text::Wrapping::None)
                     .font(SF_PRO_DISPLAY_BOLD)
                     .color(palette.primary),
             ]
