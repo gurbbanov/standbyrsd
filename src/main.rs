@@ -1295,112 +1295,111 @@ impl Application {
             )
             .on_update(Message::AnimateTheme);
 
-            if self.settings_open {
-                stack![
-                    main_window,
-                    iced::widget::mouse_area(
-                        container(
-                            iced::widget::mouse_area(responsive(move |s| {
-                                let mn = s.height.min(s.width);
+            stack![
+                main_window,
+                iced::widget::mouse_area(if self.settings_open {
+                    container(
+                        iced::widget::mouse_area(responsive(move |s| {
+                            let mn = s.height.min(s.width);
+                            container(
                                 container(
-                                    container(
-                                        column![
-                                            row![
-                                                container(text("settings").size(mn * 0.05))
-                                                    .width(Length::Fill)
-                                                    .align_x(iced::Alignment::Start),
-                                                container(
-                                                    button(
-                                                        container("")
-                                                            .width(Length::Fixed(14.0))
-                                                            .height(Length::Fixed(14.0))
-                                                    )
-                                                    .on_press(Message::CloseSettings)
-                                                    .width(Length::Fixed(20.0))
-                                                    .height(Length::Fixed(20.0))
-                                                    .padding(0)
-                                                    .style(|_, status| {
-                                                        let color = match status {
-                                                            button::Status::Hovered => {
-                                                                Color::from_rgb8(255, 80, 80)
-                                                            }
-                                                            _ => Color::from_rgb8(220, 50, 50),
-                                                        };
-
-                                                        button::Style {
-                                                            background: Some(
-                                                                iced::Background::Color(color),
-                                                            ),
-                                                            border: iced::Border {
-                                                                radius: 10.0.into(),
-                                                                ..Default::default()
-                                                            },
-                                                            ..Default::default()
+                                    column![
+                                        row![
+                                            container(text("settings").size(mn * 0.05))
+                                                .width(Length::Fill)
+                                                .align_x(iced::Alignment::Start),
+                                            container(
+                                                button(
+                                                    container("")
+                                                        .width(Length::Fixed(14.0))
+                                                        .height(Length::Fixed(14.0))
+                                                )
+                                                .on_press(Message::CloseSettings)
+                                                .width(Length::Fixed(20.0))
+                                                .height(Length::Fixed(20.0))
+                                                .padding(0)
+                                                .style(|_, status| {
+                                                    let color = match status {
+                                                        button::Status::Hovered => {
+                                                            Color::from_rgb8(255, 80, 80)
                                                         }
-                                                    })
-                                                )
-                                                .width(Length::Shrink)
-                                                .align_x(iced::Alignment::End),
-                                            ]
-                                            .width(Length::Fill),
-                                            row![
-                                                container(text("smooth tick").size(mn * 0.022))
-                                                    .width(Length::Fill)
-                                                    .align_x(iced::Alignment::Start),
-                                                container(
-                                                    iced::widget::toggler(self.smooth_tick)
-                                                        .size(mn * 0.025)
-                                                        .on_toggle(Message::ToggleSmoothTick)
-                                                )
-                                                .align_x(iced::Alignment::End)
-                                            ]
+                                                        _ => Color::from_rgb8(220, 50, 50),
+                                                    };
+
+                                                    button::Style {
+                                                        background: Some(iced::Background::Color(
+                                                            color,
+                                                        )),
+                                                        border: iced::Border {
+                                                            radius: 10.0.into(),
+                                                            ..Default::default()
+                                                        },
+                                                        ..Default::default()
+                                                    }
+                                                })
+                                            )
+                                            .width(Length::Shrink)
+                                            .align_x(iced::Alignment::End),
                                         ]
-                                        .width(Length::Fill)
-                                        .height(Length::Fill)
-                                        .spacing(s.height * 0.05),
-                                    )
-                                    .padding(mn * 0.015)
-                                    .width(Length::Fixed(mn * 0.7))
-                                    .height(Length::Fixed(mn * 0.4))
-                                    .style(move |_| {
-                                        container::Style {
-                                            background: Some(iced::Background::Color(
-                                                Color::from_rgb8(23, 23, 23),
-                                            )),
-                                            border: iced::Border {
-                                                radius: (mn * 0.015).into(),
-                                                ..Default::default()
-                                            },
-                                            ..Default::default()
-                                        }
-                                    }),
+                                        .width(Length::Fill),
+                                        row![
+                                            container(text("smooth tick").size(mn * 0.022))
+                                                .width(Length::Fill)
+                                                .align_x(iced::Alignment::Start),
+                                            container(
+                                                iced::widget::toggler(self.smooth_tick)
+                                                    .size(mn * 0.025)
+                                                    .on_toggle(Message::ToggleSmoothTick)
+                                            )
+                                            .align_x(iced::Alignment::End)
+                                        ]
+                                    ]
+                                    .width(Length::Fill)
+                                    .height(Length::Fill)
+                                    .spacing(s.height * 0.05),
                                 )
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .align_x(iced::Alignment::Center)
-                                .align_y(iced::Alignment::Center)
-                                .into()
-                            }))
-                            .on_press(Message::None)
-                        )
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .align_x(iced::Alignment::Center)
-                        .align_y(iced::Alignment::Center)
-                        .style(|_| container::Style {
-                            background: Some(iced::Background::Color(Color::from_rgba(
-                                0.0, 0.0, 0.0, 0.5
-                            ))),
-                            ..Default::default()
-                        }),
+                                .padding(mn * 0.015)
+                                .width(Length::Fixed(mn * 0.7))
+                                .height(Length::Fixed(mn * 0.4))
+                                .style(move |_| container::Style {
+                                    background: Some(iced::Background::Color(Color::from_rgb8(
+                                        23, 23, 23,
+                                    ))),
+                                    border: iced::Border {
+                                        radius: (mn * 0.015).into(),
+                                        ..Default::default()
+                                    },
+                                    ..Default::default()
+                                }),
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .align_x(iced::Alignment::Center)
+                            .align_y(iced::Alignment::Center)
+                            .into()
+                        }))
+                        .on_press(Message::None),
                     )
-                    .on_press(Message::None)
-                    .on_scroll(|_| Message::None)
-                ]
-                .into()
-            } else {
-                main_window.into()
-            }
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Center)
+                    .style(|_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            0.0, 0.0, 0.0, 0.5,
+                        ))),
+                        ..Default::default()
+                    })
+                } else {
+                    container(text(""))
+                        .width(Length::Fixed(0.0))
+                        .height(Length::Fixed(0.0))
+                        .into()
+                })
+                .on_press(Message::None)
+                .on_scroll(|_| Message::None)
+            ]
+            .into()
         } else {
             container(text("window is closed")).into()
         }
