@@ -9,7 +9,9 @@ use iced::font::{Family, Stretch, Style, Weight};
 use iced::theme::{Base, Palette};
 use iced::time::{self, milliseconds, seconds};
 use iced::widget::canvas::{Cache, LineCap, Path, Stroke, stroke};
-use iced::widget::{button, canvas, center, column, container, responsive, row, stack, svg, text};
+use iced::widget::{
+    button, canvas, center, column, combo_box, container, responsive, row, stack, svg, text,
+};
 use iced::window::{self, Id};
 use iced::{
     Alignment, Color, Degrees, Element, Font, Length, Padding, Point, Radians, Rectangle, Renderer,
@@ -133,7 +135,6 @@ struct Application {
     theme: Animated<Theme>,
     fullscreen: bool,
     fullscreen_btn_hover: Animated<f32>,
-    theme_btn_hover: Animated<f32>,
     settings_btn_hover: Animated<f32>,
     #[cfg(target_os = "windows")]
     playerctl: Option<GlobalSystemMediaTransportControlsSessionManager>,
@@ -147,6 +148,10 @@ struct Application {
     volume_preview: Option<f32>,
     main_window: Option<window::Id>,
     settings_open: bool,
+    theme_mode: ThemeMode,
+    theme_mode_list: combo_box::State<ThemeMode>,
+    theme_dark_at: String,
+    theme_light_at: String,
     smooth_tick: bool,
     current_page: usize,
     page_width: f32,
@@ -161,20 +166,21 @@ enum Message {
     WeatherFetched(WeatherStatus),
     OpenMainWindow,
     WindowOpened(Id),
-    ToggleTheme,
     AnimateGradientC1(iced_anim::Event<Color>),
     AnimateGradientC2(iced_anim::Event<Color>),
     AnimateTheme(iced_anim::Event<Theme>),
-    ThemeBtnHover(bool),
+    ThemeModeChanged(ThemeMode),
     FullscreenBtnHover(bool),
     SettingsBtnHover(bool),
     OpenSettings,
     CloseSettings,
-    AnimateThemeBtn(iced_anim::Event<f32>),
     AnimateFullscreenBtn(iced_anim::Event<f32>),
     AnimateSettingsBtn(iced_anim::Event<f32>),
     ToggleFullscreen,
     ToggleSmoothTick(bool),
+    ThemeDarkAtChanged(String),
+    ThemeLightAtChanged(String),
+    ThemeAutoTick,
     DragDelta(f32),
     SnapTick(Instant),
     AnimTick(Instant),
@@ -740,35 +746,72 @@ impl Application {
 
                 Task::none()
             }
-            Message::ToggleTheme => {
-                if self.theme.value().name() == "classic" {
-                    self.theme.update(iced_anim::Event::from(Theme::custom(
-                        "red_dark".to_string(),
-                        Palette {
-                            text: Color::from_rgb(1.0, 0.0, 0.0),
-                            background: Color::from_rgb(0.0, 0.0, 0.0),
-                            primary: color!(246, 0, 1),
-                            success: color!(0, 0, 0),
-                            warning: color!(159, 5, 0),
-                            danger: color!(87, 4, 4),
-                        },
-                    )));
-                } else {
-                    self.theme.update(iced_anim::Event::from(Theme::custom(
-                        "classic".to_string(),
-                        Palette {
-                            text: Color::WHITE,
-                            primary: color!(169, 169, 169),
-                            danger: color!(87, 87, 87),
-                            background: color!(0, 0, 0),
-                            success: Color::WHITE,
-                            warning: color!(240, 157, 10),
-                            ..Theme::Moonfly.palette()
-                        },
-                    )));
+            Message::ThemeModeChanged(mode) => {
+                self.theme_mode = mode.clone();
+                match mode {
+                    ThemeMode::Classic => {
+                        self.theme.update(iced_anim::Event::from(Theme::custom(
+                            "classic".to_string(),
+                            Palette {
+                                text: Color::WHITE,
+                                primary: color!(169, 169, 169),
+                                danger: color!(87, 87, 87),
+                                background: color!(0, 0, 0),
+                                success: Color::WHITE,
+                                warning: color!(240, 157, 10),
+                                ..Theme::Moonfly.palette()
+                            },
+                        )));
+                    }
+                    ThemeMode::RedDark => {
+                        self.theme.update(iced_anim::Event::from(Theme::custom(
+                            "red_dark".to_string(),
+                            Palette {
+                                text: Color::from_rgb(1.0, 0.0, 0.0),
+                                background: Color::from_rgb(0.0, 0.0, 0.0),
+                                primary: color!(246, 0, 1),
+                                success: color!(0, 0, 0),
+                                warning: color!(159, 5, 0),
+                                danger: color!(87, 4, 4),
+                            },
+                        )));
+                    }
+                    ThemeMode::AutoSunrise | ThemeMode::AutoCustom => {}
                 }
-
-                Task::done(Message::GetPlayer)
+                Task::none()
+                // Task::done(Message::GetPlayer)
+            }
+            Message::ThemeDarkAtChanged(s) => {
+                self.theme_dark_at = s;
+                Task::none()
+            }
+            Message::ThemeLightAtChanged(s) => {
+                self.theme_light_at = s;
+                Task::none()
+            }
+            Message::ThemeAutoTick => {
+                match self.theme_mode {
+                    ThemeMode::AutoCustom => {
+                        if let (Ok(dark_at), Ok(light_at)) = (
+                            chrono::NaiveTime::parse_from_str(&self.theme_dark_at, "%H:%M"),
+                            chrono::NaiveTime::parse_from_str(&self.theme_light_at, "%H:%M"),
+                        ) {
+                            let should_be_dark =
+                                self.time.time() >= dark_at || self.time.time() < light_at;
+                            let is_dark = self.theme.value().name() == "red_dark";
+                            if should_be_dark != is_dark {
+                                return Task::done(if should_be_dark {
+                                    Message::ThemeModeChanged(ThemeMode::RedDark)
+                                } else {
+                                    Message::ThemeModeChanged(ThemeMode::Classic)
+                                });
+                            }
+                        }
+                    }
+                    ThemeMode::AutoSunrise => {}
+                    _ => {}
+                }
+                Task::none()
             }
             Message::AnimateGradientC1(event) => {
                 self.gradient_c1.update(event);
@@ -811,12 +854,6 @@ impl Application {
 
                 Task::none()
             }
-            Message::ThemeBtnHover(hovered) => {
-                self.theme_btn_hover
-                    .set_target(if hovered { 1.0 } else { 0.0 });
-
-                Task::none()
-            }
             Message::FullscreenBtnHover(hovered) => {
                 self.fullscreen_btn_hover
                     .set_target(if hovered { 1.0 } else { 0.0 });
@@ -825,10 +862,6 @@ impl Application {
             Message::SettingsBtnHover(hovered) => {
                 self.settings_btn_hover
                     .set_target(if hovered { 1.0 } else { 0.0 });
-                Task::none()
-            }
-            Message::AnimateThemeBtn(e) => {
-                self.theme_btn_hover.update(e);
                 Task::none()
             }
             Message::AnimateFullscreenBtn(e) => {
@@ -1217,18 +1250,30 @@ impl Application {
             seconds(1)
         })
         .map(|_| Message::Tick(chrono::Local::now()));
+
         let weather = time::every(seconds(600)).map(|_| Message::FetchWeather);
+
         let metadata_update = time::every(seconds(1)).map(|_| Message::UpdateMetadata);
+
         let snap_idle = if matches!(self.drag, DragState::Active { .. }) {
             time::every(Duration::from_millis(16)).map(Message::SnapTick)
         } else {
             Subscription::none()
         };
+
         let anim = if matches!(self.drag, DragState::Snapping { .. }) {
             time::every(Duration::from_millis(16)).map(Message::AnimTick)
         } else {
             Subscription::none()
         };
+
+        let theme = match self.theme_mode {
+            ThemeMode::AutoSunrise | ThemeMode::AutoCustom => {
+                time::every(Duration::from_mins(2)).map(|_| Message::ThemeAutoTick)
+            }
+            _ => Subscription::none(),
+        };
+
         Subscription::batch([clock, weather, metadata_update, snap_idle, anim])
     }
 
@@ -1237,63 +1282,58 @@ impl Application {
             let main_window = Animation::new(
                 &self.theme,
                 Animation::new(
-                    &self.theme_btn_hover,
+                    &self.fullscreen_btn_hover,
                     Animation::new(
-                        &self.fullscreen_btn_hover,
+                        &self.settings_btn_hover,
                         Animation::new(
-                            &self.settings_btn_hover,
+                            &self.gradient_c1,
                             Animation::new(
-                                &self.gradient_c1,
-                                Animation::new(
-                                    &self.gradient_c2,
-                                    responsive(move |size| {
-                                        let total_offset: f32 = match &self.drag {
-                                            DragState::Idle => {
-                                                -(self.current_page as f32) * size.width
-                                            }
-                                            DragState::Active { offset_px, .. } => {
-                                                -(self.current_page as f32) * size.width + offset_px
-                                            }
-                                            DragState::Snapping {
-                                                start_offset,
-                                                end_offset,
-                                                velocity,
-                                                started_at,
-                                            } => {
-                                                let elapsed = started_at.elapsed().as_secs_f32();
-                                                let t = (elapsed
-                                                    / (SNAP_DURATION_MS as f32 / 1000.0))
-                                                    .min(1.0);
-                                                let dist = end_offset - start_offset;
-                                                let v0 = if dist.abs() > 0.001 {
-                                                    velocity / dist
-                                                } else {
-                                                    0.0
-                                                };
-                                                start_offset + dist * ease_spring(t, v0)
-                                            }
-                                        };
+                                &self.gradient_c2,
+                                responsive(move |size| {
+                                    let total_offset: f32 = match &self.drag {
+                                        DragState::Idle => -(self.current_page as f32) * size.width,
+                                        DragState::Active { offset_px, .. } => {
+                                            -(self.current_page as f32) * size.width + offset_px
+                                        }
+                                        DragState::Snapping {
+                                            start_offset,
+                                            end_offset,
+                                            velocity,
+                                            started_at,
+                                        } => {
+                                            let elapsed = started_at.elapsed().as_secs_f32();
+                                            let t = (elapsed / (SNAP_DURATION_MS as f32 / 1000.0))
+                                                .min(1.0);
+                                            let dist = end_offset - start_offset;
+                                            let v0 = if dist.abs() > 0.001 {
+                                                velocity / dist
+                                            } else {
+                                                0.0
+                                            };
+                                            start_offset + dist * ease_spring(t, v0)
+                                        }
+                                    };
 
-                                        slide_pages(
-                                            total_offset,
-                                            size.width,
-                                            size.height,
-                                            self.page0(size),
-                                            self.page1(size),
-                                        )
-                                    }),
-                                )
-                                .on_update(Message::AnimateGradientC2),
+                                    slide_pages(
+                                        total_offset,
+                                        size.width,
+                                        size.height,
+                                        self.page0(size),
+                                        self.page1(size),
+                                    )
+                                }),
                             )
-                            .on_update(Message::AnimateGradientC1),
+                            .on_update(Message::AnimateGradientC2),
                         )
-                        .on_update(Message::AnimateSettingsBtn),
+                        .on_update(Message::AnimateGradientC1),
                     )
-                    .on_update(Message::AnimateFullscreenBtn),
+                    .on_update(Message::AnimateSettingsBtn),
                 )
-                .on_update(Message::AnimateThemeBtn),
+                .on_update(Message::AnimateFullscreenBtn),
             )
             .on_update(Message::AnimateTheme);
+
+            let theme = self.theme.value();
 
             stack![
                 main_window,
@@ -1305,9 +1345,13 @@ impl Application {
                                 container(
                                     column![
                                         row![
-                                            container(text("settings").size(mn * 0.05))
-                                                .width(Length::Fill)
-                                                .align_x(iced::Alignment::Start),
+                                            container(
+                                                text("settings")
+                                                    .size(mn * 0.05)
+                                                    .color(theme.palette().text)
+                                            )
+                                            .width(Length::Fill)
+                                            .align_x(iced::Alignment::Start),
                                             container(
                                                 button(
                                                     container("")
@@ -1342,10 +1386,151 @@ impl Application {
                                             .align_x(iced::Alignment::End),
                                         ]
                                         .width(Length::Fill),
-                                        row![
-                                            container(text("smooth tick").size(mn * 0.022))
+                                        column![
+                                            row![
+                                                container(
+                                                    text("theme")
+                                                        .size(mn * 0.022)
+                                                        .color(theme.palette().text)
+                                                )
                                                 .width(Length::Fill)
                                                 .align_x(iced::Alignment::Start),
+                                                container(
+                                                    combo_box(
+                                                        &self.theme_mode_list,
+                                                        "select theme",
+                                                        Some(&self.theme_mode),
+                                                        Message::ThemeModeChanged,
+                                                    )
+                                                    .width(Length::Fixed(mn * 0.18))
+                                                    .input_style(move |_t, _status| {
+                                                        iced::widget::text_input::Style {
+                                                            value: theme.palette().text,
+                                                            placeholder: theme.palette().text,
+                                                            selection: theme.palette().primary,
+                                                            background: iced::Background::Color(
+                                                                Color::TRANSPARENT,
+                                                            ),
+                                                            border: iced::Border {
+                                                                color: theme.palette().primary,
+                                                                width: 1.0,
+                                                                radius: 4.0.into(),
+                                                            },
+                                                            icon: theme.palette().text,
+                                                        }
+                                                    })
+                                                    .menu_style(move |_t| {
+                                                        iced::widget::overlay::menu::Style {
+                                                            text_color: theme.palette().text,
+                                                            background: iced::Background::Color(
+                                                                Color::BLACK,
+                                                            ),
+                                                            border: iced::Border {
+                                                                color: theme.palette().primary,
+                                                                width: 1.0,
+                                                                radius: 4.0.into(),
+                                                            },
+                                                            selected_text_color: Color::BLACK,
+                                                            selected_background:
+                                                                iced::Background::Color(
+                                                                    theme.palette().primary,
+                                                                ),
+                                                            shadow: iced::Shadow::default(),
+                                                        }
+                                                    })
+                                                    .size(mn * 0.02)
+                                                )
+                                                .align_x(iced::Alignment::End)
+                                            ],
+                                            if self.theme_mode == ThemeMode::AutoCustom {
+                                                row![
+                                                    container(
+                                                        text("light at")
+                                                            .size(mn * 0.022)
+                                                            .color(theme.palette().text)
+                                                    )
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                    container(
+                                                        iced::widget::text_input(
+                                                            &self.theme_light_at,
+                                                            &self.theme_light_at
+                                                        )
+                                                        .size(mn * 0.02)
+                                                        .on_input(Message::ThemeLightAtChanged)
+                                                        .width(Length::Fixed(mn * 0.1))
+                                                        .style(move |_t, _status| {
+                                                            iced::widget::text_input::Style {
+                                                                value: theme.palette().text,
+                                                                placeholder: theme.palette().text,
+                                                                selection: theme.palette().danger,
+                                                                background: iced::Background::Color(
+                                                                    Color::TRANSPARENT,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                icon: theme.palette().text,
+                                                            }
+                                                        })
+                                                    )
+                                                    .align_x(iced::Alignment::End)
+                                                ]
+                                            } else {
+                                                row![]
+                                            },
+                                            if self.theme_mode == ThemeMode::AutoCustom {
+                                                row![
+                                                    container(
+                                                        text("dark at")
+                                                            .size(mn * 0.022)
+                                                            .color(theme.palette().text)
+                                                    )
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                    container(
+                                                        iced::widget::text_input(
+                                                            &self.theme_dark_at,
+                                                            &self.theme_dark_at
+                                                        )
+                                                        .size(mn * 0.02)
+                                                        .on_input(Message::ThemeDarkAtChanged)
+                                                        .width(Length::Fixed(mn * 0.1))
+                                                        .style(move |_t, _status| {
+                                                            iced::widget::text_input::Style {
+                                                                value: theme.palette().text,
+                                                                placeholder: theme.palette().text,
+                                                                selection: theme.palette().danger,
+                                                                background: iced::Background::Color(
+                                                                    Color::TRANSPARENT,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                icon: theme.palette().text,
+                                                            }
+                                                        })
+                                                    )
+                                                    .align_x(iced::Alignment::End)
+                                                ]
+                                            } else {
+                                                row![]
+                                            },
+                                        ]
+                                        .width(Length::Fill)
+                                        .spacing(mn * 0.01),
+                                        row![
+                                            container(
+                                                text("smooth tick")
+                                                    .size(mn * 0.022)
+                                                    .color(theme.palette().text)
+                                            )
+                                            .width(Length::Fill)
+                                            .align_x(iced::Alignment::Start),
                                             container(
                                                 iced::widget::toggler(self.smooth_tick)
                                                     .size(mn * 0.025)
@@ -1355,8 +1540,7 @@ impl Application {
                                         ]
                                     ]
                                     .width(Length::Fill)
-                                    .height(Length::Fill)
-                                    .spacing(s.height * 0.05),
+                                    .spacing(s.height * 0.03),
                                 )
                                 .padding(mn * 0.015)
                                 .width(Length::Fixed(mn * 0.7))
@@ -1462,14 +1646,6 @@ impl Application {
 
         let primary = self.theme.value().palette().primary;
 
-        let t_theme = *self.theme_btn_hover.value();
-        let theme_btn_color = Color {
-            r: primary.r * t_theme + 0.0 * (1.0 - t_theme),
-            g: primary.g * t_theme + 0.0 * (1.0 - t_theme),
-            b: primary.b * t_theme + 0.0 * (1.0 - t_theme),
-            a: 1.0,
-        };
-
         let t_fullscreen = *self.fullscreen_btn_hover.value();
         let fullscreen_btn_color = Color {
             r: primary.r * t_fullscreen + 0.0 * (1.0 - t_fullscreen),
@@ -1488,33 +1664,6 @@ impl Application {
 
         container(stack![
             row![left, right],
-            container(
-                iced::widget::mouse_area(
-                    button(
-                        svg(svg::Handle::from_memory(include_bytes!(
-                            "../icons/dark_theme.svg"
-                        )))
-                        .style(move |_theme: &Theme, _status| svg::Style {
-                            color: Some(theme_btn_color),
-                            ..Default::default()
-                        })
-                        .width(Length::Fixed(sw.min(sh) * 0.1 * t_theme.max(0.3)))
-                        .height(Length::Fixed(sw.min(sh) * 0.1 * t_theme.max(0.3))),
-                    )
-                    .style(|_, _| button::Style {
-                        background: None,
-                        ..Default::default()
-                    })
-                    .on_press(Message::ToggleTheme)
-                )
-                .on_enter(Message::ThemeBtnHover(true))
-                .on_exit(Message::ThemeBtnHover(false)),
-            )
-            .padding(Padding::new(sw.min(sh) * 0.03))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::Start)
-            .align_y(Alignment::Start),
             container(
                 iced::widget::mouse_area(
                     button(
@@ -1570,7 +1719,7 @@ impl Application {
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Alignment::Start)
-            .align_y(Alignment::End),
+            .align_y(Alignment::Start),
         ])
         .width(Length::Fixed(size.width))
         .height(Length::Fixed(size.height))
@@ -1691,21 +1840,45 @@ impl Default for Application {
                 0.0f32,
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
             ),
-            theme_btn_hover: Animated::new(
-                0.0f32,
-                Easing::EASE.with_duration(Duration::from_millis(1500)),
-            ),
             settings_btn_hover: Animated::new(
                 0.0f32,
                 Easing::EASE.with_duration(Duration::from_millis(1500)),
             ),
             main_window: None,
             settings_open: false,
+            theme_mode: ThemeMode::Classic,
+            theme_mode_list: combo_box::State::new(vec![
+                ThemeMode::Classic,
+                ThemeMode::RedDark,
+                ThemeMode::AutoSunrise,
+                ThemeMode::AutoCustom,
+            ]),
+            theme_dark_at: String::from("22:00"),
+            theme_light_at: String::from("7:00"),
             smooth_tick: true,
             current_page: 0,
             page_width: 800.0,
             drag: DragState::Idle,
             metadata_updating: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ThemeMode {
+    Classic,
+    RedDark,
+    AutoSunrise,
+    AutoCustom,
+}
+
+impl std::fmt::Display for ThemeMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ThemeMode::Classic => write!(f, "classic"),
+            ThemeMode::RedDark => write!(f, "red dark"),
+            ThemeMode::AutoSunrise => write!(f, "auto (sunrise/sunset)"),
+            ThemeMode::AutoCustom => write!(f, "auto (custom hours)"),
         }
     }
 }
