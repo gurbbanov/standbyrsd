@@ -178,8 +178,9 @@ enum Message {
     AnimateSettingsBtn(iced_anim::Event<f32>),
     ToggleFullscreen,
     ToggleSmoothTick(bool),
-    ThemeDarkAtChanged(String),
-    ThemeLightAtChanged(String),
+    ApplyTheme(ThemeMode),
+    ThemeDarkAtChanged(String, bool),
+    ThemeLightAtChanged(String, bool),
     ThemeAutoTick,
     DragDelta(f32),
     SnapTick(Instant),
@@ -746,8 +747,7 @@ impl Application {
 
                 Task::none()
             }
-            Message::ThemeModeChanged(mode) => {
-                self.theme_mode = mode.clone();
+            Message::ApplyTheme(mode) => {
                 match mode {
                     ThemeMode::Classic => {
                         self.theme.update(iced_anim::Event::from(Theme::custom(
@@ -776,17 +776,59 @@ impl Application {
                             },
                         )));
                     }
-                    ThemeMode::AutoSunrise | ThemeMode::AutoCustom => {}
+                    _ => {}
                 }
-                Task::none()
-                // Task::done(Message::GetPlayer)
+                Task::done(Message::GetPlayer)
             }
-            Message::ThemeDarkAtChanged(s) => {
-                self.theme_dark_at = s;
+            Message::ThemeModeChanged(mode) => {
+                self.theme_mode = mode.clone();
+
+                match mode {
+                    ThemeMode::Classic => Task::done(Message::ApplyTheme(ThemeMode::Classic)),
+                    ThemeMode::RedDark => Task::done(Message::ApplyTheme(ThemeMode::RedDark)),
+                    ThemeMode::AutoSunrise | ThemeMode::AutoCustom => Task::none(),
+                }
+            }
+            Message::ThemeDarkAtChanged(s, is_hours) => {
+                let filtered: String = s.chars().filter(|c| c.is_ascii_digit()).take(2).collect();
+
+                let valid = if is_hours {
+                    filtered.parse::<u8>().map_or(true, |v| v <= 23)
+                } else {
+                    filtered.parse::<u8>().map_or(true, |v| v <= 59)
+                };
+
+                if valid {
+                    let parts: Vec<&str> = self.theme_dark_at.split(':').collect();
+                    let (h, m) = (parts.get(0).unwrap_or(&"22"), parts.get(1).unwrap_or(&"00"));
+                    self.theme_dark_at = if is_hours {
+                        format!("{}:{}", filtered, m)
+                    } else {
+                        format!("{}:{}", h, filtered)
+                    };
+                }
+
                 Task::none()
             }
-            Message::ThemeLightAtChanged(s) => {
-                self.theme_light_at = s;
+            Message::ThemeLightAtChanged(s, is_hours) => {
+                let filtered: String = s.chars().filter(|c| c.is_ascii_digit()).take(2).collect();
+
+                let valid = if is_hours {
+                    filtered.parse::<u8>().map_or(true, |v| v <= 23)
+                } else {
+                    filtered.parse::<u8>().map_or(true, |v| v <= 59)
+                };
+
+                if valid {
+                    let parts: Vec<&str> = self.theme_light_at.split(':').collect();
+                    let (h, m) = (parts.get(0).unwrap_or(&"22"), parts.get(1).unwrap_or(&"00"));
+                    self.theme_light_at = if is_hours {
+                        format!("{}:{}", filtered, m)
+                    } else {
+                        format!("{}:{}", h, filtered)
+                    };
+                }
+
                 Task::none()
             }
             Message::ThemeAutoTick => {
@@ -796,14 +838,21 @@ impl Application {
                             chrono::NaiveTime::parse_from_str(&self.theme_dark_at, "%H:%M"),
                             chrono::NaiveTime::parse_from_str(&self.theme_light_at, "%H:%M"),
                         ) {
-                            let should_be_dark =
-                                self.time.time() >= dark_at || self.time.time() < light_at;
+                            let now = self.time.time();
+
+                            let should_be_dark = if dark_at < light_at {
+                                now >= dark_at && now < light_at
+                            } else {
+                                now >= dark_at || now < light_at
+                            };
+
                             let is_dark = self.theme.value().name() == "red_dark";
+
                             if should_be_dark != is_dark {
                                 return Task::done(if should_be_dark {
-                                    Message::ThemeModeChanged(ThemeMode::RedDark)
+                                    Message::ApplyTheme(ThemeMode::RedDark)
                                 } else {
-                                    Message::ThemeModeChanged(ThemeMode::Classic)
+                                    Message::ApplyTheme(ThemeMode::Classic)
                                 });
                             }
                         }
@@ -1269,12 +1318,12 @@ impl Application {
 
         let theme = match self.theme_mode {
             ThemeMode::AutoSunrise | ThemeMode::AutoCustom => {
-                time::every(Duration::from_mins(2)).map(|_| Message::ThemeAutoTick)
+                time::every(Duration::from_mins(1)).map(|_| Message::ThemeAutoTick)
             }
             _ => Subscription::none(),
         };
 
-        Subscription::batch([clock, weather, metadata_update, snap_idle, anim])
+        Subscription::batch([clock, weather, metadata_update, snap_idle, anim, theme])
     }
 
     fn view(&self, id: Id) -> Element<'_, Message> {
@@ -1402,7 +1451,7 @@ impl Application {
                                                         Some(&self.theme_mode),
                                                         Message::ThemeModeChanged,
                                                     )
-                                                    .width(Length::Fixed(mn * 0.18))
+                                                    .width(Length::Fixed(mn * 0.2))
                                                     .input_style(move |_t, _status| {
                                                         iced::widget::text_input::Style {
                                                             value: theme.palette().text,
@@ -1444,38 +1493,97 @@ impl Application {
                                             ],
                                             if self.theme_mode == ThemeMode::AutoCustom {
                                                 row![
-                                                    container(
-                                                        text("light at")
-                                                            .size(mn * 0.022)
-                                                            .color(theme.palette().text)
-                                                    )
-                                                    .width(Length::Fill)
-                                                    .align_x(iced::Alignment::Start),
-                                                    container(
-                                                        iced::widget::text_input(
-                                                            &self.theme_light_at,
-                                                            &self.theme_light_at
+                                                    container(row![
+                                                        container(
+                                                            text("light at")
+                                                                .size(mn * 0.022)
+                                                                .color(theme.palette().text)
                                                         )
-                                                        .size(mn * 0.02)
-                                                        .on_input(Message::ThemeLightAtChanged)
-                                                        .width(Length::Fixed(mn * 0.1))
-                                                        .style(move |_t, _status| {
-                                                            iced::widget::text_input::Style {
-                                                                value: theme.palette().text,
-                                                                placeholder: theme.palette().text,
-                                                                selection: theme.palette().danger,
-                                                                background: iced::Background::Color(
-                                                                    Color::TRANSPARENT,
-                                                                ),
-                                                                border: iced::Border {
-                                                                    color: theme.palette().primary,
-                                                                    width: 1.0,
-                                                                    radius: 4.0.into(),
-                                                                },
-                                                                icon: theme.palette().text,
-                                                            }
-                                                        })
-                                                    )
+                                                        .width(Length::Fill)
+                                                        .align_x(iced::Alignment::Start),
+                                                        container(row![
+                                                            iced::widget::text_input(
+                                                                "22",
+                                                                &self
+                                                                    .theme_light_at
+                                                                    .split(':')
+                                                                    .next()
+                                                                    .unwrap_or("00")
+                                                            )
+                                                            .size(mn * 0.02)
+                                                            .on_input(|s| {
+                                                                Message::ThemeLightAtChanged(
+                                                                    s, true,
+                                                                )
+                                                            })
+                                                            .width(Length::Fixed(mn * 0.05))
+                                                            .style(move |_t, _status| {
+                                                                iced::widget::text_input::Style {
+                                                                    value: theme.palette().text,
+                                                                    placeholder: theme
+                                                                        .palette()
+                                                                        .text,
+                                                                    selection: theme
+                                                                        .palette()
+                                                                        .danger,
+                                                                    background:
+                                                                        iced::Background::Color(
+                                                                            Color::TRANSPARENT,
+                                                                        ),
+                                                                    border: iced::Border {
+                                                                        color: theme
+                                                                            .palette()
+                                                                            .primary,
+                                                                        width: 1.0,
+                                                                        radius: 4.0.into(),
+                                                                    },
+                                                                    icon: theme.palette().text,
+                                                                }
+                                                            }),
+                                                            text(":")
+                                                                .size(mn * 0.022)
+                                                                .color(theme.palette().text),
+                                                            iced::widget::text_input(
+                                                                "00",
+                                                                &self
+                                                                    .theme_light_at
+                                                                    .split(':')
+                                                                    .nth(1)
+                                                                    .unwrap_or("00")
+                                                            )
+                                                            .size(mn * 0.02)
+                                                            .on_input(|s| {
+                                                                Message::ThemeLightAtChanged(
+                                                                    s, false,
+                                                                )
+                                                            })
+                                                            .width(Length::Fixed(mn * 0.05))
+                                                            .style(move |_t, _status| {
+                                                                iced::widget::text_input::Style {
+                                                                    value: theme.palette().text,
+                                                                    placeholder: theme
+                                                                        .palette()
+                                                                        .text,
+                                                                    selection: theme
+                                                                        .palette()
+                                                                        .danger,
+                                                                    background:
+                                                                        iced::Background::Color(
+                                                                            Color::TRANSPARENT,
+                                                                        ),
+                                                                    border: iced::Border {
+                                                                        color: theme
+                                                                            .palette()
+                                                                            .primary,
+                                                                        width: 1.0,
+                                                                        radius: 4.0.into(),
+                                                                    },
+                                                                    icon: theme.palette().text,
+                                                                }
+                                                            })
+                                                        ])
+                                                        .align_x(iced::Alignment::End)
+                                                    ])
                                                     .align_x(iced::Alignment::End)
                                                 ]
                                             } else {
@@ -1490,14 +1598,20 @@ impl Application {
                                                     )
                                                     .width(Length::Fill)
                                                     .align_x(iced::Alignment::Start),
-                                                    container(
+                                                    container(row![
                                                         iced::widget::text_input(
-                                                            &self.theme_dark_at,
-                                                            &self.theme_dark_at
+                                                            "22",
+                                                            &self
+                                                                .theme_dark_at
+                                                                .split(':')
+                                                                .next()
+                                                                .unwrap_or("00")
                                                         )
                                                         .size(mn * 0.02)
-                                                        .on_input(Message::ThemeDarkAtChanged)
-                                                        .width(Length::Fixed(mn * 0.1))
+                                                        .on_input(|s| {
+                                                            Message::ThemeDarkAtChanged(s, true)
+                                                        })
+                                                        .width(Length::Fixed(mn * 0.05))
                                                         .style(move |_t, _status| {
                                                             iced::widget::text_input::Style {
                                                                 value: theme.palette().text,
@@ -1513,8 +1627,40 @@ impl Application {
                                                                 },
                                                                 icon: theme.palette().text,
                                                             }
+                                                        }),
+                                                        text(":")
+                                                            .size(mn * 0.022)
+                                                            .color(theme.palette().text),
+                                                        iced::widget::text_input(
+                                                            "00",
+                                                            &self
+                                                                .theme_dark_at
+                                                                .split(':')
+                                                                .nth(1)
+                                                                .unwrap_or("00")
+                                                        )
+                                                        .size(mn * 0.02)
+                                                        .on_input(|s| {
+                                                            Message::ThemeDarkAtChanged(s, false)
                                                         })
-                                                    )
+                                                        .width(Length::Fixed(mn * 0.05))
+                                                        .style(move |_t, _status| {
+                                                            iced::widget::text_input::Style {
+                                                                value: theme.palette().text,
+                                                                placeholder: theme.palette().text,
+                                                                selection: theme.palette().danger,
+                                                                background: iced::Background::Color(
+                                                                    Color::TRANSPARENT,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                icon: theme.palette().text,
+                                                            }
+                                                        }),
+                                                    ])
                                                     .align_x(iced::Alignment::End)
                                                 ]
                                             } else {
@@ -1881,6 +2027,11 @@ impl std::fmt::Display for ThemeMode {
             ThemeMode::AutoCustom => write!(f, "auto (custom hours)"),
         }
     }
+}
+
+enum ThemeVariant {
+    Classic,
+    RedDark,
 }
 
 struct SlidePages<'a, M, T, R> {
