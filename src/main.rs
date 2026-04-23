@@ -148,15 +148,31 @@ struct Application {
     volume_preview: Option<f32>,
     main_window: Option<window::Id>,
     settings_open: bool,
-    theme_mode: ThemeMode,
     theme_mode_list: combo_box::State<ThemeMode>,
-    theme_dark_at: String,
-    theme_light_at: String,
-    smooth_tick: bool,
+    app_settings: AppSettings,
     current_page: usize,
     page_width: f32,
     drag: DragState,
     metadata_updating: bool,
+}
+
+#[derive(Debug, Clone)]
+struct AppSettings {
+    theme_mode: ThemeMode,
+    theme_dark_at: String,
+    theme_light_at: String,
+    smooth_tick: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            theme_mode: ThemeMode::Classic,
+            theme_dark_at: "22:00".to_string(),
+            theme_light_at: "07:00".to_string(),
+            smooth_tick: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -781,7 +797,7 @@ impl Application {
                 Task::done(Message::GetPlayer)
             }
             Message::ThemeModeChanged(mode) => {
-                self.theme_mode = mode.clone();
+                self.app_settings.theme_mode = mode.clone();
 
                 match mode {
                     ThemeMode::Classic => Task::done(Message::ApplyTheme(ThemeMode::Classic)),
@@ -799,9 +815,9 @@ impl Application {
                 };
 
                 if valid {
-                    let parts: Vec<&str> = self.theme_dark_at.split(':').collect();
+                    let parts: Vec<&str> = self.app_settings.theme_dark_at.split(':').collect();
                     let (h, m) = (parts.get(0).unwrap_or(&"22"), parts.get(1).unwrap_or(&"00"));
-                    self.theme_dark_at = if is_hours {
+                    self.app_settings.theme_dark_at = if is_hours {
                         format!("{}:{}", filtered, m)
                     } else {
                         format!("{}:{}", h, filtered)
@@ -820,9 +836,9 @@ impl Application {
                 };
 
                 if valid {
-                    let parts: Vec<&str> = self.theme_light_at.split(':').collect();
+                    let parts: Vec<&str> = self.app_settings.theme_light_at.split(':').collect();
                     let (h, m) = (parts.get(0).unwrap_or(&"22"), parts.get(1).unwrap_or(&"00"));
-                    self.theme_light_at = if is_hours {
+                    self.app_settings.theme_light_at = if is_hours {
                         format!("{}:{}", filtered, m)
                     } else {
                         format!("{}:{}", h, filtered)
@@ -832,11 +848,17 @@ impl Application {
                 Task::none()
             }
             Message::ThemeAutoTick => {
-                match self.theme_mode {
+                match self.app_settings.theme_mode {
                     ThemeMode::AutoCustom => {
                         if let (Ok(dark_at), Ok(light_at)) = (
-                            chrono::NaiveTime::parse_from_str(&self.theme_dark_at, "%H:%M"),
-                            chrono::NaiveTime::parse_from_str(&self.theme_light_at, "%H:%M"),
+                            chrono::NaiveTime::parse_from_str(
+                                &self.app_settings.theme_dark_at,
+                                "%H:%M",
+                            ),
+                            chrono::NaiveTime::parse_from_str(
+                                &self.app_settings.theme_light_at,
+                                "%H:%M",
+                            ),
                         ) {
                             let now = self.time.time();
 
@@ -899,7 +921,7 @@ impl Application {
                 }
             }
             Message::ToggleSmoothTick(b) => {
-                self.smooth_tick = b;
+                self.app_settings.smooth_tick = b;
 
                 Task::none()
             }
@@ -1293,7 +1315,7 @@ impl Application {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let clock = time::every(if self.smooth_tick {
+        let clock = time::every(if self.app_settings.smooth_tick {
             milliseconds(16)
         } else {
             seconds(1)
@@ -1316,7 +1338,7 @@ impl Application {
             Subscription::none()
         };
 
-        let theme = match self.theme_mode {
+        let theme = match self.app_settings.theme_mode {
             ThemeMode::AutoSunrise | ThemeMode::AutoCustom => {
                 time::every(Duration::from_mins(1)).map(|_| Message::ThemeAutoTick)
             }
@@ -1448,7 +1470,7 @@ impl Application {
                                                     combo_box(
                                                         &self.theme_mode_list,
                                                         "select theme",
-                                                        Some(&self.theme_mode),
+                                                        Some(&self.app_settings.theme_mode),
                                                         Message::ThemeModeChanged,
                                                     )
                                                     .width(Length::Fixed(mn * 0.2))
@@ -1491,7 +1513,8 @@ impl Application {
                                                 )
                                                 .align_x(iced::Alignment::End)
                                             ],
-                                            if self.theme_mode == ThemeMode::AutoCustom {
+                                            if self.app_settings.theme_mode == ThemeMode::AutoCustom
+                                            {
                                                 row![
                                                     container(row![
                                                         container(
@@ -1505,6 +1528,7 @@ impl Application {
                                                             iced::widget::text_input(
                                                                 "22",
                                                                 &self
+                                                                    .app_settings
                                                                     .theme_light_at
                                                                     .split(':')
                                                                     .next()
@@ -1546,6 +1570,7 @@ impl Application {
                                                             iced::widget::text_input(
                                                                 "00",
                                                                 &self
+                                                                    .app_settings
                                                                     .theme_light_at
                                                                     .split(':')
                                                                     .nth(1)
@@ -1589,7 +1614,8 @@ impl Application {
                                             } else {
                                                 row![]
                                             },
-                                            if self.theme_mode == ThemeMode::AutoCustom {
+                                            if self.app_settings.theme_mode == ThemeMode::AutoCustom
+                                            {
                                                 row![
                                                     container(
                                                         text("dark at")
@@ -1602,6 +1628,7 @@ impl Application {
                                                         iced::widget::text_input(
                                                             "22",
                                                             &self
+                                                                .app_settings
                                                                 .theme_dark_at
                                                                 .split(':')
                                                                 .next()
@@ -1634,6 +1661,7 @@ impl Application {
                                                         iced::widget::text_input(
                                                             "00",
                                                             &self
+                                                                .app_settings
                                                                 .theme_dark_at
                                                                 .split(':')
                                                                 .nth(1)
@@ -1678,9 +1706,11 @@ impl Application {
                                             .width(Length::Fill)
                                             .align_x(iced::Alignment::Start),
                                             container(
-                                                iced::widget::toggler(self.smooth_tick)
-                                                    .size(mn * 0.025)
-                                                    .on_toggle(Message::ToggleSmoothTick)
+                                                iced::widget::toggler(
+                                                    self.app_settings.smooth_tick
+                                                )
+                                                .size(mn * 0.025)
+                                                .on_toggle(Message::ToggleSmoothTick)
                                             )
                                             .align_x(iced::Alignment::End)
                                         ]
@@ -1756,7 +1786,7 @@ impl Application {
                     self.seek_preview,
                     self.volume_preview,
                     self.volume,
-                    self.smooth_tick,
+                    self.app_settings.smooth_tick,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1779,7 +1809,7 @@ impl Application {
                     self.seek_preview,
                     self.volume_preview,
                     self.volume,
-                    self.smooth_tick,
+                    self.app_settings.smooth_tick,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1888,7 +1918,7 @@ impl Application {
                     self.seek_preview,
                     self.volume_preview,
                     self.volume,
-                    self.smooth_tick,
+                    self.app_settings.smooth_tick,
                 ))
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
@@ -1992,16 +2022,13 @@ impl Default for Application {
             ),
             main_window: None,
             settings_open: false,
-            theme_mode: ThemeMode::Classic,
             theme_mode_list: combo_box::State::new(vec![
                 ThemeMode::Classic,
                 ThemeMode::RedDark,
                 ThemeMode::AutoSunrise,
                 ThemeMode::AutoCustom,
             ]),
-            theme_dark_at: String::from("22:00"),
-            theme_light_at: String::from("7:00"),
-            smooth_tick: true,
+            app_settings: AppSettings::default(),
             current_page: 0,
             page_width: 800.0,
             drag: DragState::Idle,
