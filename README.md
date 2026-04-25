@@ -25,11 +25,7 @@ standbyrsd is simple cross-platform GUI application built with Rust and [Iced](h
 <br></br>
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/1a629aa3-68e1-4882-bfe9-ee6bc8396d97" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/1788ceb0-7238-4999-810c-e5c2a9afbd47" />
-
->[!NOTE]
->not ready yet, a day/night overlay will be added
-
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/daf83d32-bcc4-485a-b1bc-8d6357b07a60" />
 <br></br>
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/3c7a9d38-e916-4857-8f5f-4c18aa726a9e" />
 <br></br>
