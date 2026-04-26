@@ -1,4 +1,5 @@
 use chrono::prelude::*;
+use fluent::{FluentBundle, FluentResource};
 use iced::advanced::{
     Clipboard, Renderer as AdvancedRenderer, Shell,
     layout::{self, Layout},
@@ -27,6 +28,7 @@ use serde::Deserialize;
 use std::cell::Cell;
 use std::f64::consts::PI;
 use std::time::{Duration, Instant};
+use unic_langid::langid;
 use volumecontrol;
 #[cfg(target_os = "windows")]
 use windows::Media::Control::{
@@ -150,29 +152,40 @@ struct Application {
     volume_preview: Option<f32>,
     main_window: Option<window::Id>,
     settings_open: bool,
-    theme_mode_list: combo_box::State<ThemeMode>,
     app_settings: AppSettings,
     current_page: usize,
     page_width: f32,
     drag: DragState,
     metadata_updating: bool,
+    l10n: L10n,
 }
 
 #[derive(Debug, Clone)]
 struct AppSettings {
     theme_mode: ThemeMode,
+    theme_mode_combo: combo_box::State<ThemeMode>,
     theme_dark_at: String,
     theme_light_at: String,
     smooth_tick: bool,
+    locale: Locale,
+    locale_combo: combo_box::State<Locale>,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme_mode: ThemeMode::Classic,
+            theme_mode_combo: combo_box::State::new(vec![
+                ThemeMode::Classic,
+                ThemeMode::RedDark,
+                ThemeMode::AutoSunrise,
+                ThemeMode::AutoCustom,
+            ]),
             theme_dark_at: "22:00".to_string(),
             theme_light_at: "07:00".to_string(),
             smooth_tick: true,
+            locale: Locale::En,
+            locale_combo: combo_box::State::new(Locale::all()),
         }
     }
 }
@@ -219,6 +232,7 @@ enum Message {
     SeekCommit(f32),
     VolumePreview(f32),
     VolumeCommit(f32),
+    LocaleChanged(Locale),
     None,
 }
 
@@ -276,16 +290,20 @@ impl Application {
                 }
                 Task::none()
             }
-            Message::FetchWeather => Task::perform(
-                async {
-                    let mut w = Weather::default();
-                    match w.fetch().await {
-                        Ok(()) => WeatherStatus::Ok(w),
-                        Err(e) => WeatherStatus::Error(e.to_string()),
-                    }
-                },
-                Message::WeatherFetched,
-            ),
+            Message::FetchWeather => {
+                let locale = self.app_settings.locale.clone();
+
+                Task::perform(
+                    async move {
+                        let mut w = Weather::default();
+                        match w.fetch(&locale).await {
+                            Ok(()) => WeatherStatus::Ok(w),
+                            Err(e) => WeatherStatus::Error(e.to_string()),
+                        }
+                    },
+                    Message::WeatherFetched,
+                )
+            }
             Message::WeatherFetched(status) => {
                 self.weather = status;
 
@@ -1344,6 +1362,16 @@ impl Application {
 
                 Task::none()
             }
+            Message::LocaleChanged(locale) => {
+                self.app_settings.locale = locale.clone();
+                self.l10n = L10n::new(self.app_settings.locale.as_str());
+
+                for w in &self.page1_widgets {
+                    w.clear_cache();
+                }
+
+                Task::done(Message::FetchWeather)
+            }
             Message::None => Task::none(),
         }
     }
@@ -1451,7 +1479,7 @@ impl Application {
                                     column![
                                         row![
                                             container(
-                                                text("settings")
+                                                text(self.l10n.get("settings"))
                                                     .size(mn * 0.05)
                                                     .color(theme.palette().text)
                                             )
@@ -1494,7 +1522,7 @@ impl Application {
                                         column![
                                             row![
                                                 container(
-                                                    text("theme")
+                                                    text(self.l10n.get("theme"))
                                                         .size(mn * 0.022)
                                                         .color(theme.palette().text)
                                                 )
@@ -1502,12 +1530,12 @@ impl Application {
                                                 .align_x(iced::Alignment::Start),
                                                 container(
                                                     combo_box(
-                                                        &self.theme_mode_list,
-                                                        "select theme",
+                                                        &self.app_settings.theme_mode_combo,
+                                                        &self.l10n.get("select-theme"),
                                                         Some(&self.app_settings.theme_mode),
                                                         Message::ThemeModeChanged,
                                                     )
-                                                    .width(Length::Fixed(mn * 0.2))
+                                                    .width(Length::Fixed(mn * 0.24))
                                                     .input_style(move |_t, _status| {
                                                         iced::widget::text_input::Style {
                                                             value: theme.palette().text,
@@ -1552,7 +1580,7 @@ impl Application {
                                                 row![
                                                     container(row![
                                                         container(
-                                                            text("light at")
+                                                            text(self.l10n.get("light-at"))
                                                                 .size(mn * 0.022)
                                                                 .color(theme.palette().text)
                                                         )
@@ -1652,7 +1680,7 @@ impl Application {
                                             {
                                                 row![
                                                     container(
-                                                        text("dark at")
+                                                        text(self.l10n.get("dark-at"))
                                                             .size(mn * 0.022)
                                                             .color(theme.palette().text)
                                                     )
@@ -1733,7 +1761,7 @@ impl Application {
                                         .spacing(mn * 0.01),
                                         row![
                                             container(
-                                                text("smooth tick")
+                                                text(self.l10n.get("smooth-tick"))
                                                     .size(mn * 0.022)
                                                     .color(theme.palette().text)
                                             )
@@ -1745,6 +1773,61 @@ impl Application {
                                                 )
                                                 .size(mn * 0.025)
                                                 .on_toggle(Message::ToggleSmoothTick)
+                                            )
+                                            .align_x(iced::Alignment::End)
+                                        ],
+                                        row![
+                                            container(
+                                                text(self.l10n.get("language"))
+                                                    .size(mn * 0.022)
+                                                    .color(theme.palette().text)
+                                            )
+                                            .width(Length::Fill)
+                                            .align_x(iced::Alignment::Start),
+                                            container(
+                                                combo_box(
+                                                    &self.app_settings.locale_combo,
+                                                    &self.l10n.get("select-language"),
+                                                    Some(&self.app_settings.locale),
+                                                    Message::LocaleChanged,
+                                                )
+                                                .width(Length::Fixed(mn * 0.2))
+                                                .input_style(move |_t, _status| {
+                                                    iced::widget::text_input::Style {
+                                                        value: theme.palette().text,
+                                                        placeholder: theme.palette().text,
+                                                        selection: theme.palette().primary,
+                                                        background: iced::Background::Color(
+                                                            Color::TRANSPARENT,
+                                                        ),
+                                                        border: iced::Border {
+                                                            color: theme.palette().primary,
+                                                            width: 1.0,
+                                                            radius: 4.0.into(),
+                                                        },
+                                                        icon: theme.palette().text,
+                                                    }
+                                                })
+                                                .menu_style(move |_t| {
+                                                    iced::widget::overlay::menu::Style {
+                                                        text_color: theme.palette().text,
+                                                        background: iced::Background::Color(
+                                                            Color::BLACK,
+                                                        ),
+                                                        border: iced::Border {
+                                                            color: theme.palette().primary,
+                                                            width: 1.0,
+                                                            radius: 4.0.into(),
+                                                        },
+                                                        selected_text_color: Color::BLACK,
+                                                        selected_background:
+                                                            iced::Background::Color(
+                                                                theme.palette().primary,
+                                                            ),
+                                                        shadow: iced::Shadow::default(),
+                                                    }
+                                                })
+                                                .size(mn * 0.02)
                                             )
                                             .align_x(iced::Alignment::End)
                                         ]
@@ -1821,6 +1904,7 @@ impl Application {
                     self.volume_preview,
                     self.volume,
                     self.app_settings.smooth_tick,
+                    &self.l10n,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1844,6 +1928,7 @@ impl Application {
                     self.volume_preview,
                     self.volume,
                     self.app_settings.smooth_tick,
+                    &self.l10n,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -1953,6 +2038,7 @@ impl Application {
                     self.volume_preview,
                     self.volume,
                     self.app_settings.smooth_tick,
+                    &self.l10n,
                 ))
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
@@ -1966,6 +2052,9 @@ impl Application {
 
 impl Default for Application {
     fn default() -> Self {
+        let app_settings = AppSettings::default();
+        let l10n = L10n::new(app_settings.locale.as_str());
+
         Application {
             time: chrono::Local::now(),
             weather: WeatherStatus::Loading,
@@ -2056,17 +2145,12 @@ impl Default for Application {
             ),
             main_window: None,
             settings_open: false,
-            theme_mode_list: combo_box::State::new(vec![
-                ThemeMode::Classic,
-                ThemeMode::RedDark,
-                ThemeMode::AutoSunrise,
-                ThemeMode::AutoCustom,
-            ]),
-            app_settings: AppSettings::default(),
+            app_settings: app_settings,
             current_page: 0,
             page_width: 800.0,
             drag: DragState::Idle,
             metadata_updating: false,
+            l10n: l10n,
         }
     }
 }
@@ -2614,11 +2698,12 @@ impl AppWidget {
         volume_preview: Option<f32>,
         volume: f32,
         smooth_tick: bool,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         match self {
-            AppWidget::Clock(w) => w.view(time, weather, theme, size, smooth_tick),
-            AppWidget::Calendar(w) => w.view(time),
-            AppWidget::Weather(w) => w.view(theme, time, weather, size),
+            AppWidget::Clock(w) => w.view(time, weather, theme, size, smooth_tick, l10n),
+            AppWidget::Calendar(w) => w.view(l10n, time),
+            AppWidget::Weather(w) => w.view(theme, time, weather, size, l10n),
             AppWidget::Media(w) => w.view(
                 media_metadata,
                 theme,
@@ -2656,8 +2741,8 @@ impl CalendarWidget {
         Self { style }
     }
 
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
-        self.style.view(time)
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
+        self.style.view(l10n, time)
     }
 }
 
@@ -2673,10 +2758,10 @@ enum CalendarStyle {
 }
 
 impl CalendarStyle {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
         match self {
-            CalendarStyle::MonthHalf(c) => c.view(time),
-            CalendarStyle::DateHalf(c) => c.view(time),
+            CalendarStyle::MonthHalf(c) => c.view(l10n, time),
+            CalendarStyle::DateHalf(c) => c.view(l10n, time),
         }
     }
 }
@@ -2697,20 +2782,20 @@ struct MonthCalendarHalf {
 }
 
 impl MonthCalendarHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
             self.cache.clear();
         }
 
-        canvas((self, time))
+        canvas((self, l10n, time))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a L10n, &'a DateTime<Local>) {
     type State = ();
 
     fn draw(
@@ -2721,7 +2806,7 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, now) = self;
+        let (widget, l10n, now) = self;
         let palette = theme.palette();
 
         let layer = widget.cache.draw(renderer, bounds.size(), |frame| {
@@ -2760,7 +2845,8 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
             let offset_y = (h - total_h) * 0.5;
 
             frame.fill_text(canvas::Text {
-                content: format!("   {}", now.format("%B")).to_uppercase(),
+                content: format!("   {}", l10n.get(&format!("month-{}", now.month())))
+                    .to_uppercase(),
                 position: Point::new(offset_x, offset_y + month_font_size * 0.5),
                 size: month_font_size.into(),
                 color: color!(255, 0, 0),
@@ -2770,7 +2856,9 @@ impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a DateTime<Local
                 ..canvas::Text::default()
             });
 
-            let weekdays = ["M", "T", "W", "T", "F", "S", "S"];
+            let weekdays: Vec<String> = (1..=7)
+                .map(|i| l10n.get(&format!("weekday-short-{}", i)))
+                .collect();
 
             for (col, label) in weekdays.iter().enumerate() {
                 let x = offset_x + col as f32 * cell_w + cell_w * 0.5;
@@ -2841,20 +2929,20 @@ struct DateCalendarHalf {
 }
 
 impl DateCalendarHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
             self.cache.clear();
         }
 
-        canvas((self, time))
+        canvas((self, l10n, time))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a L10n, &'a DateTime<Local>) {
     type State = ();
 
     fn draw(
@@ -2865,7 +2953,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, time) = self;
+        let (widget, l10n, time) = self;
         let palette = theme.palette();
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             frame.with_save(|frame| {
@@ -2873,7 +2961,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
                 let center = Point::new(frame.width() / 2.0, frame.height() / 2.0);
 
                 frame.fill_text(canvas::Text {
-                    content: format!("{:3}", time.weekday()),
+                    content: l10n.get(&format!("weekday-{}", time.weekday().number_from_monday())),
                     size: Pixels(size * 0.2),
                     position: Point::new(center.x - size * 0.02, center.y - size * 0.25),
                     color: color!(255, 0, 0),
@@ -2884,7 +2972,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a DateTime<Local>
                 });
 
                 frame.fill_text(canvas::Text {
-                    content: time.format("%b").to_string(),
+                    content: l10n.get(&format!("month-{}-short", time.month())),
                     size: Pixels(size * 0.2),
                     position: Point::new(center.x + size * 0.02, center.y - size * 0.25),
                     color: palette.danger,
@@ -2934,8 +3022,10 @@ impl ClockWidget {
         theme: &'a Theme,
         size: Size,
         smooth_tick: bool,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
-        self.style.view(time, weather, theme, size, smooth_tick)
+        self.style
+            .view(time, weather, theme, size, smooth_tick, l10n)
     }
 }
 
@@ -2962,13 +3052,14 @@ impl ClockStyle {
         theme: &'a Theme,
         size: Size,
         smooth_tick: bool,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         match self {
             ClockStyle::DigitalHalf(clock) => clock.view(time),
             ClockStyle::AnalogueHalf(clock) => clock.view(time, smooth_tick),
             ClockStyle::MinimalHalf(clock) => clock.view(time, smooth_tick),
             ClockStyle::AnalogueRectHalf(clock) => clock.view(time, smooth_tick),
-            ClockStyle::AnalogueRectFull(clock) => clock.view(time, smooth_tick),
+            ClockStyle::AnalogueRectFull(clock) => clock.view(time, smooth_tick, l10n),
             ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size),
         }
     }
@@ -3883,9 +3974,14 @@ struct AnalogueRectClockFull {
 }
 
 impl AnalogueRectClockFull {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        smooth_tick: bool,
+        l10n: &'a L10n,
+    ) -> Element<'a, Message> {
         stack![
-            self.clock_frame.view(time),
+            self.clock_frame.view(time, l10n),
             self.hands.view(time, smooth_tick)
         ]
         .into()
@@ -3905,20 +4001,26 @@ struct ClockFrameAnalogueRectFull {
 }
 
 impl ClockFrameAnalogueRectFull {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, time: &'a DateTime<Local>, l10n: &'a L10n) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
             self.cache.clear();
         }
 
-        canvas((self, time))
+        canvas((self, time, l10n))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueRectFull, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message>
+    for (
+        &'a ClockFrameAnalogueRectFull,
+        &'a DateTime<Local>,
+        &'a L10n,
+    )
+{
     type State = ();
 
     fn draw(
@@ -3929,7 +4031,7 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueRectFull, &'a DateT
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, time) = self;
+        let (widget, time, l10n) = self;
         let palette = theme.palette();
 
         let static_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
@@ -4121,7 +4223,9 @@ impl<'a> canvas::Program<Message> for (&'a ClockFrameAnalogueRectFull, &'a DateT
                 }
 
                 frame.fill_text(canvas::Text {
-                    content: time.weekday().to_string().to_uppercase(),
+                    content: l10n
+                        .get(&format!("weekday-{}", time.weekday().number_from_monday()))
+                        .to_uppercase(),
                     size: Pixels(50.0 * scale),
                     position: Point::new(frame.width() * 2.0 / 3.0, frame.center().y),
                     color: color!(255, 0, 0),
@@ -4409,13 +4513,13 @@ struct Weather {
 }
 
 impl Weather {
-    async fn fetch(&mut self) -> Result<(), reqwest::Error> {
+    async fn fetch(&mut self, lang: &Locale) -> Result<(), reqwest::Error> {
         let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
 
         let info = geolocation::find(&ip).unwrap();
 
         let response: Weather = reqwest::get(
-            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto", info.latitude, info.longitude),
+            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto&language={}", info.latitude, info.longitude, lang),
         )
         .await?
         .json::<Self>()
@@ -4476,8 +4580,9 @@ impl WeatherWidget {
         time: &'a DateTime<Local>,
         weather: &'a WeatherStatus,
         size: Size,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
-        self.style.view(time, theme, weather, size)
+        self.style.view(time, theme, weather, size, l10n)
     }
 }
 
@@ -4508,11 +4613,12 @@ impl WeatherStyle {
         theme: &'a Theme,
         weather: &'a WeatherStatus,
         size: Size,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         match self {
-            Self::MinimalHalf(w) => w.view(theme, weather, size),
-            Self::DetailedHalf(w) => w.view(theme, weather, size),
-            Self::DailyHalf(w) => w.view(theme, time, weather, size),
+            Self::MinimalHalf(w) => w.view(theme, weather, size, l10n),
+            Self::DetailedHalf(w) => w.view(theme, weather, size, l10n),
+            Self::DailyHalf(w) => w.view(theme, time, weather, size, l10n),
         }
     }
 }
@@ -4538,6 +4644,7 @@ impl MinimalForecastHalf {
         theme: &'a Theme,
         weather: &'a WeatherStatus,
         size: Size,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         let w = size.width;
         let h = size.height;
@@ -4587,7 +4694,7 @@ impl MinimalForecastHalf {
         };
 
         stack![
-            canvas((self, weather))
+            canvas((self, l10n, weather))
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(icon)
@@ -4599,7 +4706,7 @@ impl MinimalForecastHalf {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatus) {
+impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a L10n, &'a WeatherStatus) {
     type State = ();
 
     fn draw(
@@ -4611,7 +4718,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let palette = theme.palette();
-        let (widget, weather) = self;
+        let (widget, l10n, weather) = self;
 
         let static_layer = match weather {
             WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
@@ -4663,8 +4770,8 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a WeatherStatu
 
                     frame.fill_text(canvas::Text {
                         content: format!(
-                            "H:{:.0}° L:{:.0}°",
-                            daily.apparent_temperature_max[0], daily.apparent_temperature_min[0]
+                            "{}:{:.0}° {}:{:.0}°", l10n.get("high-short"),
+                            daily.apparent_temperature_max[0], daily.apparent_temperature_min[0], l10n.get("low-short")
                         ),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
@@ -4719,6 +4826,7 @@ impl DetailedForecastHalf {
         theme: &'a Theme,
         weather: &'a WeatherStatus,
         size: Size,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         let w = size.width;
         let h = size.height;
@@ -4766,7 +4874,7 @@ impl DetailedForecastHalf {
         };
 
         stack![
-            canvas((self, weather))
+            canvas((self, l10n, weather))
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(icon)
@@ -4778,7 +4886,7 @@ impl DetailedForecastHalf {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStatus) {
+impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a WeatherStatus) {
     type State = ();
 
     fn draw(
@@ -4789,7 +4897,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, weather) = self;
+        let (widget, l10n, weather) = self;
         let palette = theme.palette();
 
         let static_layer = match weather {
@@ -4859,7 +4967,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("Precip"),
+                        content: l10n.get("precipitation"),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
@@ -4877,8 +4985,8 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                             .iter()
                             .enumerate()
                             .find(|(_, num)| **num >= 30.0)
-                            .map_or("None for 7d".to_string(), |(i, &v)| {
-                                format!("{} % in {}d", v, i)
+                            .map_or(l10n.get("none-for-7d"), |(i, &v)| {
+                                format!("{} % {} {}{}", v, l10n.get("in"), i, l10n.get("day"))
                             }),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
@@ -4893,7 +5001,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("Wind"),
+                        content: l10n.get("wind"),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
@@ -4906,7 +5014,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{} m/s", current.wind_speed_10m),
+                        content: format!("{} {}", current.wind_speed_10m, l10n.get("ms")),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -4920,7 +5028,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("UVI"),
+                        content: l10n.get("uvi"),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
@@ -4947,7 +5055,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a WeatherStat
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("Feels Like"),
+                        content: l10n.get("feels-like"),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
@@ -5017,6 +5125,7 @@ impl DailyForecastHalf {
         time: &'a DateTime<Local>,
         weather: &'a WeatherStatus,
         size: Size,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
@@ -5090,7 +5199,7 @@ impl DailyForecastHalf {
         let daily_column = column(daily_icons).spacing(45.0 * scale);
 
         stack![
-            canvas((self, time, weather))
+            canvas((self, time, l10n, weather))
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(icon)
@@ -5110,6 +5219,7 @@ impl<'a> canvas::Program<Message>
     for (
         &'a DailyForecastHalf,
         &'a DateTime<Local>,
+        &'a L10n,
         &'a WeatherStatus,
     )
 {
@@ -5123,10 +5233,12 @@ impl<'a> canvas::Program<Message>
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, time, weather) = self;
+        let (widget, time, l10n, weather) = self;
         let palette = theme.palette();
 
-        let weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        let weekdays: Vec<String> = (1..=7)
+            .map(|i| l10n.get(&format!("weekday-{}", i)))
+            .collect();
         let today = weekday_to_number(&time.weekday());
 
         let mut curr_padding = -50.0;
@@ -7272,3 +7384,60 @@ static MAP_DOTS: &[(f64, f64)] = &[
     (-80.81433224755699, -75.48928238583412),
     (-80.81433224755699, -69.45013979496738),
 ];
+
+#[derive(Clone, Debug)]
+enum Locale {
+    En,
+    Ru,
+}
+
+impl Locale {
+    fn as_str(&self) -> &str {
+        match self {
+            Locale::En => "en",
+            Locale::Ru => "ru",
+        }
+    }
+
+    fn all() -> Vec<Locale> {
+        vec![Locale::En, Locale::Ru]
+    }
+}
+
+impl std::fmt::Display for Locale {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Locale::En => write!(f, "english"),
+            Locale::Ru => write!(f, "русский"),
+        }
+    }
+}
+
+struct L10n {
+    bundle: FluentBundle<FluentResource>,
+}
+
+impl L10n {
+    fn new(locale: &str) -> Self {
+        let ftl = match locale {
+            "ru" => include_str!("../locales/ru/main.ftl"),
+            _ => include_str!("../locales/en/main.ftl"),
+        };
+
+        let res = FluentResource::try_new(ftl.to_string()).unwrap();
+        let langid = locale.parse().unwrap_or(langid!("en"));
+        let mut bundle = FluentBundle::new(vec![langid]);
+        bundle.add_resource(res).unwrap();
+
+        Self { bundle }
+    }
+
+    fn get(&self, key: &str) -> String {
+        let msg = self.bundle.get_message(key).unwrap();
+        let pattern = msg.value().unwrap();
+        let mut errors = vec![];
+        self.bundle
+            .format_pattern(pattern, None, &mut errors)
+            .to_string()
+    }
+}
