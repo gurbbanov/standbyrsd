@@ -1,9 +1,10 @@
 use chrono::prelude::*;
-use iced::advanced::Renderer as AdvancedRenderer;
-use iced::advanced::layout::{self, Layout};
-use iced::advanced::renderer;
-use iced::advanced::widget::{self};
-use iced::advanced::{Clipboard, Shell};
+use iced::advanced::{
+    Clipboard, Renderer as AdvancedRenderer, Shell,
+    layout::{self, Layout},
+    renderer,
+    widget::{self},
+};
 use iced::border::Radius;
 use iced::font::{Family, Stretch, Style, Weight};
 use iced::theme::{Base, Palette};
@@ -880,7 +881,39 @@ impl Application {
                             }
                         }
                     }
-                    ThemeMode::AutoSunrise => {}
+                    ThemeMode::AutoSunrise => {
+                        if let WeatherStatus::Ok(w) = &self.weather {
+                            if let Some(daily) = &w.daily {
+                                if let (Some(sunrise), Some(sunset)) =
+                                    (daily.sunrise.first(), daily.sunset.first())
+                                {
+                                    let sunrise_time = sunrise.split('T').nth(1).and_then(|t| {
+                                        chrono::NaiveTime::parse_from_str(t, "%H:%M").ok()
+                                    });
+
+                                    let sunset_time = sunset.split('T').nth(1).and_then(|t| {
+                                        chrono::NaiveTime::parse_from_str(t, "%H:%M").ok()
+                                    });
+
+                                    if let (Some(sunrise_time), Some(sunset_time)) =
+                                        (sunrise_time, sunset_time)
+                                    {
+                                        let now = self.time.time();
+                                        let should_be_dark =
+                                            now < sunrise_time || now >= sunset_time;
+                                        let is_dark = self.theme.value().name() == "red_dark";
+                                        if should_be_dark != is_dark {
+                                            return Task::done(if should_be_dark {
+                                                Message::ApplyTheme(ThemeMode::RedDark)
+                                            } else {
+                                                Message::ApplyTheme(ThemeMode::Classic)
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 Task::none()
@@ -1341,7 +1374,7 @@ impl Application {
 
         let theme = match self.app_settings.theme_mode {
             ThemeMode::AutoSunrise | ThemeMode::AutoCustom => {
-                time::every(Duration::from_mins(1)).map(|_| Message::ThemeAutoTick)
+                time::every(Duration::from_mins(2)).map(|_| Message::ThemeAutoTick)
             }
             _ => Subscription::none(),
         };
@@ -4177,7 +4210,6 @@ impl WorldClockFull {
                 .padding(Padding {
                     top: 0.0,
                     bottom: 0.0,
-                    // bottom: size.height * 0.1,
                     right: size.width * 0.015,
                     left: 0.0
                 })
@@ -4383,7 +4415,7 @@ impl Weather {
         let info = geolocation::find(&ip).unwrap();
 
         let response: Weather = reqwest::get(
-            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature", info.latitude, info.longitude),
+            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto", info.latitude, info.longitude),
         )
         .await?
         .json::<Self>()
@@ -4417,6 +4449,8 @@ struct DailyForecast {
     precipitation_probability_max: Vec<f32>,
     weather_code: Vec<u8>,
     uv_index_max: Vec<f32>,
+    sunrise: Vec<String>,
+    sunset: Vec<String>,
 }
 
 struct WeatherWidget {
