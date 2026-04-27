@@ -56,7 +56,3 @@ dark-at = dark at
 smooth-tick = smooth tick
 language = language
 select-language = select language
-classic = classic
-red-dark = red dark
-auto-custom = auto (custom hours)
-auto-sun = auto (sunrise/sunset)

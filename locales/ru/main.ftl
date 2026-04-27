@@ -1,6 +1,6 @@
 not-playing = Не воспроизводится
 location-unavailable = Местоположение недоступно
-precipitation = Влажн
+precipitation = Осадки
 none-for-7d = Нет в ближайшие 7д
 in = через
 day = д
@@ -56,7 +56,3 @@ dark-at = темно с
 smooth-tick = плавный тик
 language = язык
 select-language = выберите язык
-classic = классическая
-red-dark = красная тёмная
-auto-custom = авто (своё время)
-auto-sun = авто (восход/закат)

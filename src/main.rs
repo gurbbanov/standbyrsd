@@ -4770,8 +4770,11 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a L10n, &'a We
 
                     frame.fill_text(canvas::Text {
                         content: format!(
-                            "{}:{:.0}° {}:{:.0}°", l10n.get("high-short"),
-                            daily.apparent_temperature_max[0], daily.apparent_temperature_min[0], l10n.get("low-short")
+                            "{}:{:.0}° {}:{:.0}°",
+                            l10n.get("high-short"),
+                            daily.apparent_temperature_max[0],
+                            l10n.get("low-short"),
+                            daily.apparent_temperature_min[0]
                         ),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
@@ -7389,6 +7392,15 @@ static MAP_DOTS: &[(f64, f64)] = &[
 enum Locale {
     En,
     Ru,
+    Az,
+    Tr,
+    Ka,
+    De,
+    Es,
+    Fr,
+    Ja,
+    Kk,
+    Zh,
 }
 
 impl Locale {
@@ -7396,11 +7408,32 @@ impl Locale {
         match self {
             Locale::En => "en",
             Locale::Ru => "ru",
+            Locale::Az => "az",
+            Locale::Tr => "tr",
+            Locale::Ka => "ka",
+            Locale::De => "de",
+            Locale::Es => "es",
+            Locale::Fr => "fr",
+            Locale::Ja => "ja",
+            Locale::Kk => "kk",
+            Locale::Zh => "zh",
         }
     }
 
     fn all() -> Vec<Locale> {
-        vec![Locale::En, Locale::Ru]
+        vec![
+            Locale::En,
+            Locale::Ru,
+            Locale::Az,
+            Locale::Tr,
+            Locale::Ka,
+            Locale::De,
+            Locale::Es,
+            Locale::Fr,
+            Locale::Ja,
+            Locale::Kk,
+            Locale::Zh,
+        ]
     }
 }
 
@@ -7409,6 +7442,15 @@ impl std::fmt::Display for Locale {
         match self {
             Locale::En => write!(f, "english"),
             Locale::Ru => write!(f, "русский"),
+            Locale::Az => write!(f, "azərbaycanca"),
+            Locale::Tr => write!(f, "türkçe"),
+            Locale::Ka => write!(f, "ქართული"),
+            Locale::De => write!(f, "deutsch"),
+            Locale::Es => write!(f, "español"),
+            Locale::Fr => write!(f, "français"),
+            Locale::Ja => write!(f, "日本語"),
+            Locale::Kk => write!(f, "қазақша"),
+            Locale::Zh => write!(f, "中文"),
         }
     }
 }
@@ -7421,6 +7463,15 @@ impl L10n {
     fn new(locale: &str) -> Self {
         let ftl = match locale {
             "ru" => include_str!("../locales/ru/main.ftl"),
+            "az" => include_str!("../locales/az/main.ftl"),
+            "tr" => include_str!("../locales/tr/main.ftl"),
+            "ka" => include_str!("../locales/ka/main.ftl"),
+            "de" => include_str!("../locales/de/main.ftl"),
+            "es" => include_str!("../locales/es/main.ftl"),
+            "fr" => include_str!("../locales/es/main.ftl"),
+            "ja" => include_str!("../locales/ja/main.ftl"),
+            "kk" => include_str!("../locales/kk/main.ftl"),
+            "zh" => include_str!("../locales/zh/main.ftl"),
             _ => include_str!("../locales/en/main.ftl"),
         };
 
