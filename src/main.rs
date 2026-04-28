@@ -2963,7 +2963,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a L10n, &'a DateT
                 frame.fill_text(canvas::Text {
                     content: l10n.get(&format!("weekday-{}", time.weekday().number_from_monday())),
                     size: Pixels(size * 0.2),
-                    position: Point::new(center.x - size * 0.02, center.y - size * 0.25),
+                    position: Point::new(center.x - size * 0.02, center.y - size * 0.23),
                     color: color!(255, 0, 0),
                     align_y: alignment::Vertical::Bottom,
                     align_x: text::Alignment::Right,
@@ -2974,7 +2974,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a L10n, &'a DateT
                 frame.fill_text(canvas::Text {
                     content: l10n.get(&format!("month-{}-short", time.month())),
                     size: Pixels(size * 0.2),
-                    position: Point::new(center.x + size * 0.02, center.y - size * 0.25),
+                    position: Point::new(center.x + size * 0.02, center.y - size * 0.23),
                     color: palette.danger,
                     align_y: alignment::Vertical::Bottom,
                     align_x: text::Alignment::Left,
@@ -2985,7 +2985,7 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a L10n, &'a DateT
                 frame.fill_text(canvas::Text {
                     content: format!("{}", time.day()),
                     size: Pixels(size * 0.8),
-                    position: Point::new(center.x, center.y + size * 0.05),
+                    position: Point::new(center.x, center.y + size * 0.11),
                     color: palette.text,
                     align_y: alignment::Vertical::Center,
                     align_x: text::Alignment::Center,
@@ -3060,7 +3060,7 @@ impl ClockStyle {
             ClockStyle::MinimalHalf(clock) => clock.view(time, smooth_tick),
             ClockStyle::AnalogueRectHalf(clock) => clock.view(time, smooth_tick),
             ClockStyle::AnalogueRectFull(clock) => clock.view(time, smooth_tick, l10n),
-            ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size),
+            ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size, l10n),
         }
     }
 }
@@ -4294,6 +4294,7 @@ impl WorldClockFull {
         weather: &'a WeatherStatus,
         theme: &'a Theme,
         size: Size,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         if time.minute() != self.minute.get() {
             self.minute.set(time.minute());
@@ -4320,7 +4321,7 @@ impl WorldClockFull {
                 .align_right(size.width)
                 .width(Length::Fill)
                 .height(Length::Fill),
-            canvas((self, time, weather))
+            canvas((self, l10n, time, weather))
                 .width(Length::Fill)
                 .height(Length::Fill),
         ]
@@ -4328,7 +4329,14 @@ impl WorldClockFull {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, &'a WeatherStatus) {
+impl<'a> canvas::Program<Message>
+    for (
+        &'a WorldClockFull,
+        &'a L10n,
+        &'a DateTime<Local>,
+        &'a WeatherStatus,
+    )
+{
     type State = ();
 
     fn draw(
@@ -4339,7 +4347,7 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, time, weather) = self;
+        let (widget, l10n, time, weather) = self;
         let palette = theme.palette();
 
         let static_layer = match weather {
@@ -4353,7 +4361,7 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
                     let map_width = frame.width() * 0.85;
                     let map_height = map_width * (921.0 / 2146.0);
 
-                    let map_offset_y = (frame.height() - map_height) / 2.0;
+                    let map_offset_y = (frame.height() - map_height * 1.15) / 2.0;
 
                     let point = lat_lon_to_xy(
                         lat.parse::<f64>().unwrap(),
@@ -4401,7 +4409,7 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
             WeatherStatus::Error(e) => widget.cache.draw(renderer, bounds.size(), |frame| {
                 let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
                 frame.fill_text(canvas::Text {
-                    content: String::from("Location unavailable"),
+                    content: l10n.get("location-unavailable"),
                     size: Pixels(50.0 * scale),
                     position: Point::new(
                         frame.center().x - (bounds.width * 0.45),
@@ -4473,28 +4481,25 @@ impl<'a> canvas::Program<Message> for (&'a WorldClockFull, &'a DateTime<Local>, 
                     let dot = nx * sun.0 + ny * sun.1 + nz * sun.2;
 
                     let color = if dot < 0.0 {
-                        Color::from_rgb(
-                            0x51 as f32 / 255.0,
-                            0x51 as f32 / 255.0,
-                            0x51 as f32 / 255.0,
-                        )
+                        theme.palette().danger
                     } else {
                         continue;
                     };
 
                     let p = to_canvas(*lat, *lon);
 
-                    let circle = Path::circle(p, bounds.height.min(bounds.width) * 0.009);
+                    let scale = (frame.width() + frame.height()) / (1920.0 + 1080.0);
+                    let circle = Path::circle(p, scale * 10.0);
                     frame.fill(&circle, color);
                 }
 
-                draw_night_overlay(&mut frame, map_bounds, sub_lat, sub_lon);
+                draw_night_overlay(&mut frame, map_bounds, theme, sub_lat, sub_lon);
             }
 
             frame.into_geometry()
         };
 
-        vec![static_layer, night_layer]
+        vec![night_layer, static_layer]
     }
 }
 
@@ -6494,7 +6499,18 @@ pub fn terminator_points(sub_lat_deg: f64, sub_lon_deg: f64, n: usize) -> Vec<(f
         })
         .collect()
 }
-pub fn draw_night_overlay(frame: &mut Frame, bounds: Rectangle, sub_lat: f64, sub_lon: f64) {
+pub fn draw_night_overlay(
+    frame: &mut Frame,
+    bounds: Rectangle,
+    theme: &Theme,
+    sub_lat: f64,
+    sub_lon: f64,
+) {
+    let theme_color = theme.palette().primary;
+    let color = |t: f32| -> Color {
+        Color::from_rgba(theme_color.r, theme_color.g, theme_color.b, 0.3 + t * 0.5)
+    };
+
     let mut points = terminator_points(sub_lat, sub_lon, 360);
     points.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
@@ -6519,7 +6535,6 @@ pub fn draw_night_overlay(frame: &mut Frame, bounds: Rectangle, sub_lat: f64, su
             p1.x += offset;
 
             let t = (lat0.abs() / 90.0) as f32;
-            let color = Color::from_rgba(1.0, 1.0, 1.0, 0.3 + t * 0.5);
 
             frame.stroke(
                 &Path::new(|b| {
@@ -6527,7 +6542,7 @@ pub fn draw_night_overlay(frame: &mut Frame, bounds: Rectangle, sub_lat: f64, su
                     b.line_to(p1);
                 }),
                 canvas::Stroke::default()
-                    .with_color(color)
+                    .with_color(color(t))
                     .with_width(bounds.width.min(bounds.height) * 0.015),
             );
         }
@@ -6544,7 +6559,7 @@ pub fn draw_night_overlay(frame: &mut Frame, bounds: Rectangle, sub_lat: f64, su
                 b.line_to(next_first_pt);
             }),
             canvas::Stroke::default()
-                .with_color(Color::from_rgba(1.0, 1.0, 1.0, 0.3 + t * 0.5))
+                .with_color(color(t))
                 .with_width(bounds.width.min(bounds.height) * 0.015),
         );
     }
