@@ -4761,7 +4761,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a L10n, &'a We
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{}", wmo_code_description(current.weather_code)),
+                        content: format!("{}", wmo_code_description(current.weather_code, l10n)),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.05,
@@ -6082,24 +6082,24 @@ fn hand_rotation_sec(value: f32, max: f32) -> Radians {
     Radians(value / max * std::f32::consts::TAU)
 }
 
-fn wmo_code_description(code: u8) -> &'static str {
+fn wmo_code_description(code: u8, l10n: &L10n) -> String {
     match code {
-        0 => "Clear",
-        1 => "Mostly clear",
-        2 => "Partly cloudy",
-        3 => "Cloudy",
-        45..=48 => "Fog",
-        51..=55 => "Drizzle",
-        56..=57 => "Freezing drizzle",
-        61..=63 => "Rain",
-        65 => "Heavy rain",
-        66..=67 => "Freezing rain",
-        71..=73 => "Snow",
-        75 => "Heavy snow",
-        77 => "Blizzard",
-        80..=86 => "Wintry mix",
-        95..=99 => "Thunderstorm",
-        _ => "n/a",
+        0 => l10n.get("clear"),
+        1 => l10n.get("mostly-clear"),
+        2 => l10n.get("partly-cloudy"),
+        3 => l10n.get("cloudy"),
+        45..=48 => l10n.get("fog"),
+        51..=55 => l10n.get("drizzle"),
+        56..=57 => l10n.get("freezing-drizzle"),
+        61..=63 => l10n.get("rain"),
+        65 => l10n.get("heavy-rain"),
+        66..=67 => l10n.get("freezing-rain"),
+        71..=73 => l10n.get("snow"),
+        75 => l10n.get("heavy-snow"),
+        77 => l10n.get("blizzard"),
+        80..=86 => l10n.get("wintry-mix"),
+        95..=99 => l10n.get("thunderstorm"),
+        _ => l10n.get("n-a"),
     }
 }
 
@@ -7483,7 +7483,7 @@ impl L10n {
             "ka" => include_str!("../locales/ka/main.ftl"),
             "de" => include_str!("../locales/de/main.ftl"),
             "es" => include_str!("../locales/es/main.ftl"),
-            "fr" => include_str!("../locales/es/main.ftl"),
+            "fr" => include_str!("../locales/fr/main.ftl"),
             "ja" => include_str!("../locales/ja/main.ftl"),
             "kk" => include_str!("../locales/kk/main.ftl"),
             "zh" => include_str!("../locales/zh/main.ftl"),
