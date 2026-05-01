@@ -2714,6 +2714,7 @@ impl AppWidget {
                 seek_preview,
                 volume_preview,
                 volume,
+                l10n,
             ),
         }
     }
@@ -4392,7 +4393,7 @@ impl<'a> canvas::Program<Message>
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{}:{:02}", time.hour(), time.minute()),
+                        content: format!("{:02}:{:02}", time.hour(), time.minute()),
                         size: Pixels(200.0 * scale),
                         position: Point::new(
                             frame.center().x - (bounds.width * 0.45),
@@ -4517,11 +4518,34 @@ struct Weather {
     daily: Option<DailyForecast>,
 }
 
+#[derive(serde::Deserialize)]
+struct GeoResult {
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GeoResponse {
+    results: Option<Vec<GeoResult>>,
+}
+
 impl Weather {
     async fn fetch(&mut self, lang: &Locale) -> Result<(), reqwest::Error> {
         let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
 
         let info = geolocation::find(&ip).unwrap();
+
+        let name = reqwest::get(format!(
+            "https://geocoding-api.open-meteo.com/v1/search?name={}&language={}&count=1",
+            info.city.replace("\"", ""),
+            lang.as_str()
+        ))
+        .await?
+        .json::<GeoResponse>()
+        .await?
+        .results
+        .and_then(|r| r.into_iter().next())
+        .map(|r| r.name)
+        .unwrap_or_else(|| info.city.clone());
 
         let response: Weather = reqwest::get(
             format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto&language={}", info.latitude, info.longitude, lang),
@@ -4531,7 +4555,7 @@ impl Weather {
         .await?;
 
         *self = Weather {
-            city: Some(info.city.replace("\"", "")),
+            city: Some(name),
             coordinate: Some((info.latitude, info.longitude)),
             ..response
         };
@@ -4655,9 +4679,9 @@ impl MinimalForecastHalf {
         let h = size.height;
         let scale = (w / 960.0).min(h / 1080.0);
 
-        let icon_size = 100.0 * scale;
+        let icon_size = 110.0 * scale;
         let icon_x = w * 0.05;
-        let icon_y = h / 2.0 + 200.0 * scale - icon_size - 20.0 * scale;
+        let icon_y = h / 2.0 + 270.0 * scale - icon_size - 20.0 * scale;
 
         let icon: Element<Message> = match weather {
             WeatherStatus::Ok(w_data) => {
@@ -4751,7 +4775,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a L10n, &'a We
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{:.0}°", current.temperature_2m),
+                        content: format!("{:.0}°", if current.temperature_2m.abs() < 1.0 { 0.0 } else { current.temperature_2m }),
                         size: Pixels(w.min(h) * 0.37),
                         position: Point::new(w * 0.05, frame.center().y + 50.0 * scale.min(h / 1080.0)),
                         color: palette.text,
@@ -4777,9 +4801,9 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a L10n, &'a We
                         content: format!(
                             "{}:{:.0}° {}:{:.0}°",
                             l10n.get("high-short"),
-                            daily.apparent_temperature_max[0],
+                            if daily.apparent_temperature_max[0].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_max[0] },
                             l10n.get("low-short"),
-                            daily.apparent_temperature_min[0]
+                            if daily.apparent_temperature_min[0].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_min[0] }
                         ),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
@@ -4934,7 +4958,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a W
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{:.0}°", current.temperature_2m),
+                        content: format!("{:.0}°", if current.temperature_2m.abs() < 1.0 { 0.0 } else { current.temperature_2m }),
                         size: Pixels(w.min(h) * 0.2),
                         position: Point::new(
                             w * 0.05,
@@ -4947,7 +4971,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a W
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("↑{:.0}°", daily.apparent_temperature_max[0]),
+                        content: format!("↑{:.0}°", if daily.apparent_temperature_max[0].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_max[0] }),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -4961,7 +4985,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a W
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("↓{:.0}°", daily.apparent_temperature_min[0]),
+                        content: format!("↓{:.0}°", if daily.apparent_temperature_min[0].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_min[0] }),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -5278,7 +5302,7 @@ impl<'a> canvas::Program<Message>
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{:.0}°", current.temperature_2m),
+                        content: format!("{:.0}°", if current.temperature_2m.abs() < 1.0 { 0.0 } else { current.temperature_2m }),
                         size: Pixels(w.min(h) * 0.2),
                         position: Point::new(
                             w * 0.05,
@@ -5291,7 +5315,7 @@ impl<'a> canvas::Program<Message>
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("↑{:.0}°", daily.apparent_temperature_max[0]),
+                        content: format!("↑{:.0}°", if daily.apparent_temperature_max[0].abs() < 1.0 { 0.0 } else {daily.apparent_temperature_max[0]}),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -5305,7 +5329,7 @@ impl<'a> canvas::Program<Message>
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("↓{:.0}°", daily.apparent_temperature_min[0]),
+                        content: format!("↓{:.0}°", if daily.apparent_temperature_min[0].abs() < 1.0 { 0.0 } else {daily.apparent_temperature_min[0]}),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -5333,7 +5357,7 @@ impl<'a> canvas::Program<Message>
                         });
 
                         frame.fill_text(canvas::Text {
-                            content: format!("{:.0}°", daily.apparent_temperature_min[counter]),
+                            content: format!("{:.0}°", if daily.apparent_temperature_min[counter].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_min[counter] }),
                             size: Pixels(w.min(h) * 0.08),
                             position: Point::new(
                                 w * 0.80,
@@ -5347,7 +5371,7 @@ impl<'a> canvas::Program<Message>
                         });
 
                         frame.fill_text(canvas::Text {
-                            content: format!("{:.0}°", daily.apparent_temperature_max[counter]),
+                            content: format!("{:.0}°", if daily.apparent_temperature_max[counter].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_max[counter] }),
                             size: Pixels(w.min(h) * 0.08),
                             position: Point::new(
                                 w * 0.95,
@@ -5383,7 +5407,7 @@ impl<'a> canvas::Program<Message>
                             });
 
                             frame.fill_text(canvas::Text {
-                                content: format!("{:.0}°", daily.apparent_temperature_min[counter]),
+                                content: format!("{:.0}°", if daily.apparent_temperature_min[counter].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_min[counter] }),
                                 size: Pixels(w.min(h) * 0.08),
                                 position: Point::new(
                                     w * 0.80,
@@ -5397,7 +5421,7 @@ impl<'a> canvas::Program<Message>
                             });
 
                             frame.fill_text(canvas::Text {
-                                content: format!("{:.0}°", daily.apparent_temperature_max[counter]),
+                                content: format!("{:.0}°", if daily.apparent_temperature_max[counter].abs() < 1.0 { 0.0 } else { daily.apparent_temperature_max[counter ]}),
                                 size: Pixels(w.min(h) * 0.08),
                                 position: Point::new(
                                     w * 0.95,
@@ -5462,6 +5486,7 @@ impl MediaWidget {
         seek_preview: Option<f32>,
         voluem_preview: Option<f32>,
         volume: f32,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         self.style.view(
             media_metadata,
@@ -5473,6 +5498,7 @@ impl MediaWidget {
             seek_preview,
             voluem_preview,
             volume,
+            l10n,
         )
     }
 }
@@ -5500,6 +5526,7 @@ impl MediaStyle {
         seek_preview: Option<f32>,
         volume_preview: Option<f32>,
         volume: f32,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         match self {
             MediaStyle::MediaHalf(m) => m.view(
@@ -5510,6 +5537,7 @@ impl MediaStyle {
                 seek_preview,
                 volume_preview,
                 volume,
+                l10n,
             ),
             MediaStyle::MediaFull(m) => m.view(
                 media_metadata,
@@ -5521,6 +5549,7 @@ impl MediaStyle {
                 seek_preview,
                 volume_preview,
                 volume,
+                l10n,
             ),
             _ => unimplemented!(),
         }
@@ -5552,6 +5581,7 @@ impl MediaWidgetHalf {
         seek_preview: Option<f32>,
         volume_preview: Option<f32>,
         volume: f32,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         let s = size.width.min(size.height);
         let palette = theme.palette();
@@ -5641,15 +5671,7 @@ impl MediaWidgetHalf {
                     },
                     m.duration / 10000,
                 ),
-                None => (
-                    "Not playing".to_string(),
-                    "—".to_string(),
-                    false,
-                    0,
-                    0,
-                    0,
-                    0,
-                ),
+                None => (l10n.get("not-playing"), "—".to_string(), false, 0, 0, 0, 0),
             };
 
         let btn = |handle: svg::Handle, size: f32, msg: Message| -> Element<Message> {
@@ -5789,6 +5811,7 @@ impl MediaWidgetFull {
         seek_preview: Option<f32>,
         volume_preview: Option<f32>,
         volume: f32,
+        l10n: &'a L10n,
     ) -> Element<'a, Message> {
         let s = size.height.min(size.width / 2.0);
         let palette = theme.palette();
@@ -5836,15 +5859,7 @@ impl MediaWidgetFull {
                     },
                     m.duration / 10000,
                 ),
-                None => (
-                    "Not playing".to_string(),
-                    "—".to_string(),
-                    false,
-                    0,
-                    0,
-                    0,
-                    0,
-                ),
+                None => (l10n.get("not-playing"), "—".to_string(), false, 0, 0, 0, 0),
             };
 
         let btn = |handle: svg::Handle, size: f32, msg: Message| -> Element<Message> {
