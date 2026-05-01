@@ -1,0 +1,3 @@
+[submodule "media-remote"]
+	path = media-remote
+	url = https://github.com/nohackjustnoobb/media-remote.git
