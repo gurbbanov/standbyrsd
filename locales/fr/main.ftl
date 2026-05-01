@@ -1,5 +1,8 @@
 not-playing = Rien en lecture
 location-unavailable = Emplacement indisponible
+weather-unavailable =
+    Météo
+    Indisponible
 precipitation = Précip.
 none-for-7d = Aucune pour 7j
 in = dans

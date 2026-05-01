@@ -1,5 +1,8 @@
 not-playing = 未在播放
 location-unavailable = 位置不可用
+weather-unavailable =
+    天气
+    不可用
 precipitation = 降水
 none-for-7d = 7天无降水
 in = 于

@@ -1,5 +1,8 @@
 not-playing = Sin reproducción
 location-unavailable = Ubicación no disponible
+weather-unavailable =
+    Clima No
+    Disponible
 precipitation = Precip.
 none-for-7d = Sin lluvia 7d
 in = en

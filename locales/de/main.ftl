@@ -1,5 +1,8 @@
 not-playing = Nichts läuft
 location-unavailable = Standort nicht verfügbar
+weather-unavailable =
+    Wetter Nicht
+    Verfügbar
 precipitation = Regen
 none-for-7d = Kein Regen 7T
 in = in

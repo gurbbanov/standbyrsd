@@ -1,5 +1,8 @@
 not-playing = Не воспроизводится
 location-unavailable = Местоположение недоступно
+weather-unavailable =
+    Погода
+    Недоступна
 precipitation = Осадки
 none-for-7d = Нет 7д
 in = через

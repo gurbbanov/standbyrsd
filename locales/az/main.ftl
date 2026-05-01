@@ -1,5 +1,8 @@
 not-playing = Çalınmır
 location-unavailable = Yer mövcud deyil
+weather-unavailable =
+    Hava Məlumatı
+    Yoxdur
 precipitation = Yağış
 none-for-7d = 7 gün yoxdur
 in = ərzində

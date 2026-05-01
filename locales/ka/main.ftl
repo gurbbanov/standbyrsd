@@ -1,5 +1,8 @@
 not-playing = არ უკრავს
 location-unavailable = მდებარეობა მიუწვდომელია
+weather-unavailable =
+    ამინდი
+    მიუწვდომელია
 precipitation = ნალექი
 none-for-7d = არა 7დ
 in = -ში

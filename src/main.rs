@@ -2062,14 +2062,26 @@ impl Default for Application {
                 AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueHalf(
                     AnalogueClockHalf::default(),
                 ))),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueCityHalf(
+                    AnalogueClockCityHalf::default(),
+                ))),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalHalf(
                     MinimalClockHalf::default(),
+                ))),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalCityHalf(
+                    MinimalClockCityHalf::default(),
                 ))),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueRectHalf(
                     AnalogueRectClockHalf::default(),
                 ))),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueRectCityHalf(
+                    AnalogueRectClockCityHalf::default(),
+                ))),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::DigitalHalf(
                     DigitalClockHalf::default(),
+                ))),
+                AppWidget::Clock(ClockWidget::new(ClockStyle::DigitalCityHalf(
+                    DigitalClockCityHalf::default(),
                 ))),
             ],
             page0_right: vec![
@@ -2172,11 +2184,6 @@ impl std::fmt::Display for ThemeMode {
             ThemeMode::AutoCustom => write!(f, "auto (custom hours)"),
         }
     }
-}
-
-enum ThemeVariant {
-    Classic,
-    RedDark,
 }
 
 struct SlidePages<'a, M, T, R> {
@@ -3038,9 +3045,13 @@ impl ClearCache for ClockWidget {
 
 enum ClockStyle {
     DigitalHalf(DigitalClockHalf),
+    DigitalCityHalf(DigitalClockCityHalf),
     AnalogueHalf(AnalogueClockHalf),
+    AnalogueCityHalf(AnalogueClockCityHalf),
     MinimalHalf(MinimalClockHalf),
+    MinimalCityHalf(MinimalClockCityHalf),
     AnalogueRectHalf(AnalogueRectClockHalf),
+    AnalogueRectCityHalf(AnalogueRectClockCityHalf),
     AnalogueRectFull(AnalogueRectClockFull),
     WorldFull(WorldClockFull),
 }
@@ -3057,9 +3068,19 @@ impl ClockStyle {
     ) -> Element<'a, Message> {
         match self {
             ClockStyle::DigitalHalf(clock) => clock.view(time),
+            ClockStyle::DigitalCityHalf(clock) => clock.view(time, weather, size, theme),
             ClockStyle::AnalogueHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::AnalogueCityHalf(clock) => {
+                clock.view(time, weather, smooth_tick, size, theme)
+            }
             ClockStyle::MinimalHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::MinimalCityHalf(clock) => {
+                clock.view(time, weather, smooth_tick, size, theme)
+            }
             ClockStyle::AnalogueRectHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::AnalogueRectCityHalf(clock) => {
+                clock.view(time, weather, smooth_tick, size, theme)
+            }
             ClockStyle::AnalogueRectFull(clock) => clock.view(time, smooth_tick, l10n),
             ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size, l10n),
         }
@@ -3070,6 +3091,7 @@ impl ClearCache for ClockStyle {
     fn clear_cache(&self) {
         match self {
             ClockStyle::AnalogueHalf(clock) => clock.clear_cache(),
+            ClockStyle::AnalogueCityHalf(clock) => clock.clear_cache(),
             ClockStyle::MinimalHalf(clock) => clock.clear_cache(),
             ClockStyle::AnalogueRectHalf(clock) => clock.clear_cache(),
             ClockStyle::AnalogueRectFull(clock) => clock.clear_cache(),
@@ -3184,7 +3206,7 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
                 }
             });
 
-            let font_size = s * 0.47;
+            let font_size = s * 0.45;
 
             // часы
             frame.fill_text(canvas::Text {
@@ -3234,6 +3256,97 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>
         });
 
         vec![dynamic_layer]
+    }
+}
+
+#[derive(Default)]
+struct DigitalClockCityHalf {
+    clock_frame: DigitalClockHalf,
+}
+
+impl DigitalClockCityHalf {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        size: Size,
+        theme: &'a Theme,
+    ) -> Element<'a, Message> {
+        let wdt = size.width;
+        let hgh = size.height;
+        let scale = (wdt / 960.0).min(hgh / 1080.0);
+
+        let (city_label, temp_label) = match weather {
+            WeatherStatus::Ok(w) => (
+                container(
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 1050.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text(format!(
+                        "{:.0}",
+                        if w.current.as_ref().unwrap().apparent_temperature.abs() < 1.0 {
+                            0.0
+                        } else {
+                            w.current.as_ref().unwrap().apparent_temperature
+                        }
+                    ))
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .font(SF_PRO_ROUNDED_BLACK)
+                    .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 + 50.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+            _ => (
+                container(
+                    text("n/a")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 1050.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text("-")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .font(SF_PRO_ROUNDED_BLACK)
+                        .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 + 50.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+        };
+
+        stack![city_label, temp_label, stack![self.clock_frame.view(time)],]
+            .width(Length::Fill)
+            .into()
+    }
+}
+
+impl ClearCache for DigitalClockCityHalf {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
     }
 }
 
@@ -3609,6 +3722,103 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
 }
 
 #[derive(Default)]
+struct AnalogueClockCityHalf {
+    hands: Hands,
+    clock_frame: ClockFrameAnalogueHalf,
+}
+
+impl AnalogueClockCityHalf {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        smooth_tick: bool,
+        size: Size,
+        theme: &'a Theme,
+    ) -> Element<'a, Message> {
+        let wdt = size.width;
+        let hgh = size.height;
+        let scale = (wdt / 960.0).min(hgh / 1080.0);
+
+        let (city_label, temp_label) = match weather {
+            WeatherStatus::Ok(w) => (
+                container(
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text(format!(
+                        "{:.0}",
+                        if w.current.as_ref().unwrap().apparent_temperature.abs() < 1.0 {
+                            0.0
+                        } else {
+                            w.current.as_ref().unwrap().apparent_temperature
+                        }
+                    ))
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .font(SF_PRO_ROUNDED_BLACK)
+                    .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 200.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+            _ => (
+                container(
+                    text("n/a")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text("-")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .font(SF_PRO_ROUNDED_BLACK)
+                        .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 200.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+        };
+
+        stack![
+            city_label,
+            temp_label,
+            stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)],
+        ]
+        .width(Length::Fill)
+        .into()
+    }
+}
+
+impl ClearCache for AnalogueClockCityHalf {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
+    }
+}
+
+#[derive(Default)]
 struct MinimalClockHalf {
     hands: Hands,
     clock_frame: ClockFrameMinimalHalf,
@@ -3680,6 +3890,103 @@ impl<Message> canvas::Program<Message> for ClockFrameMinimalHalf {
         });
 
         vec![static_layer]
+    }
+}
+
+#[derive(Default)]
+struct MinimalClockCityHalf {
+    hands: Hands,
+    clock_frame: ClockFrameMinimalHalf,
+}
+
+impl MinimalClockCityHalf {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        smooth_tick: bool,
+        size: Size,
+        theme: &'a Theme,
+    ) -> Element<'a, Message> {
+        let wdt = size.width;
+        let hgh = size.height;
+        let scale = (wdt / 960.0).min(hgh / 1080.0);
+
+        let (city_label, temp_label) = match weather {
+            WeatherStatus::Ok(w) => (
+                container(
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text(format!(
+                        "{:.0}",
+                        if w.current.as_ref().unwrap().apparent_temperature.abs() < 1.0 {
+                            0.0
+                        } else {
+                            w.current.as_ref().unwrap().apparent_temperature
+                        }
+                    ))
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .font(SF_PRO_ROUNDED_BLACK)
+                    .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 200.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+            _ => (
+                container(
+                    text("n/a")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text("-")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .font(SF_PRO_ROUNDED_BLACK)
+                        .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 200.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+        };
+
+        stack![
+            city_label,
+            temp_label,
+            stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)],
+        ]
+        .width(Length::Fill)
+        .into()
+    }
+}
+
+impl ClearCache for MinimalClockCityHalf {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
     }
 }
 
@@ -3780,7 +4087,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x, point.y + inner_padding_min * 2.0)
+                        Point::new(point.x, point.y + inner_padding_min * 3.0)
                     } else {
                         Point::new(
                             point.x + inner_padding_hour * (dx / dy),
@@ -3825,7 +4132,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x, point.y - inner_padding_min * 2.0)
+                        Point::new(point.x, point.y - inner_padding_min * 3.0)
                     } else {
                         Point::new(
                             point.x - inner_padding_hour * (dx / dy),
@@ -3870,7 +4177,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x + inner_padding_min * 2.0, point.y)
+                        Point::new(point.x + inner_padding_min * 3.0, point.y)
                     } else {
                         Point::new(
                             point.x + inner_padding_hour,
@@ -3915,7 +4222,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                     let dy = center.y - point.y;
 
                     let end_point = if *i == 0.5 {
-                        Point::new(point.x - inner_padding_min * 2.0, point.y)
+                        Point::new(point.x - inner_padding_min * 3.0, point.y)
                     } else {
                         Point::new(
                             point.x - inner_padding_hour,
@@ -3934,19 +4241,19 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                 let hours = vec![
                     (
                         "12",
-                        Point::new(center.x, offset_y + inner_padding_hour * 1.6),
+                        Point::new(center.x, offset_y + inner_padding_hour * 1.8),
                     ),
                     (
                         "3",
-                        Point::new(offset_x + size - inner_padding_hour * 1.6, center.y),
+                        Point::new(offset_x + size - inner_padding_hour * 1.75, center.y),
                     ),
                     (
                         "6",
-                        Point::new(center.x, offset_y + size - inner_padding_hour * 1.6),
+                        Point::new(center.x, offset_y + size - inner_padding_hour * 1.8),
                     ),
                     (
                         "9",
-                        Point::new(offset_x + inner_padding_hour * 1.6, center.y),
+                        Point::new(offset_x + inner_padding_hour * 1.75, center.y),
                     ),
                 ];
 
@@ -3965,6 +4272,103 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
             })
         });
         vec![static_layer]
+    }
+}
+
+#[derive(Default)]
+struct AnalogueRectClockCityHalf {
+    hands: Hands,
+    clock_frame: ClockFrameAnalogueRectHalf,
+}
+
+impl AnalogueRectClockCityHalf {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Local>,
+        weather: &'a WeatherStatus,
+        smooth_tick: bool,
+        size: Size,
+        theme: &'a Theme,
+    ) -> Element<'a, Message> {
+        let wdt = size.width;
+        let hgh = size.height;
+        let scale = (wdt / 960.0).min(hgh / 1080.0);
+
+        let (city_label, temp_label) = match weather {
+            WeatherStatus::Ok(w) => (
+                container(
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 750.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text(format!(
+                        "{:.0}",
+                        if w.current.as_ref().unwrap().apparent_temperature.abs() < 1.0 {
+                            0.0
+                        } else {
+                            w.current.as_ref().unwrap().apparent_temperature
+                        }
+                    ))
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .font(SF_PRO_ROUNDED_BLACK)
+                    .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 250.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+            _ => (
+                container(
+                    text("n/a")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 750.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+                container(
+                    text("-")
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .font(SF_PRO_ROUNDED_BLACK)
+                        .height(Length::Fixed(scale * 65.0)),
+                )
+                .padding(padding::top(hgh.min(wdt) / 2.0 - 250.0 * scale))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center),
+            ),
+        };
+
+        stack![
+            city_label,
+            temp_label,
+            stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)],
+        ]
+        .width(Length::Fill)
+        .into()
+    }
+}
+
+impl ClearCache for AnalogueRectClockCityHalf {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
     }
 }
 
@@ -4832,7 +5236,7 @@ impl<'a> canvas::Program<Message> for (&'a MinimalForecastHalf, &'a L10n, &'a We
             // }),
             _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
-                    content: String::from("Weather\nUnavailable"),
+                    content: l10n.get("weather-unavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
                     color: palette.text,
@@ -5129,7 +5533,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a W
             // }),
             _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
-                    content: String::from("Weather\nUnavailable"),
+                    content: l10n.get("weather-unavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
                     color: palette.text,
@@ -5455,7 +5859,7 @@ impl<'a> canvas::Program<Message>
             // }),
             _/*WeatherStatus::Error(e)*/ => widget.cache.draw(renderer, bounds.size(), |frame| {
                 frame.fill_text(canvas::Text {
-                    content: String::from("Weather\nUnavailable"),
+                    content: l10n.get("weather-unavailable"),
                     size: Pixels((frame.width() / 2.0).min(frame.height()) * 0.2),
                     position: frame.center(),
                     color: palette.text,

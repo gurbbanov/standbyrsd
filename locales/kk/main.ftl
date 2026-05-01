@@ -1,5 +1,8 @@
 not-playing = Ойнатылмуда
 location-unavailable = Орын қолжетімсіз
+weather-unavailable =
+    Ауа Райы
+    Қол Жетімсіз
 precipitation = Жауын
 none-for-7d = 7 күн жоқ
 in = кейін

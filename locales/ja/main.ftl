@@ -1,6 +1,9 @@
 not-playing = 再生なし
 location-unavailable = 場所を取得できません
 precipitation = 降水
+weather-unavailable =
+    天気情報
+    なし
 none-for-7d = 7日間降水なし
 in = 後
 day = 日

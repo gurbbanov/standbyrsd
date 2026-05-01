@@ -1,5 +1,8 @@
 not-playing = Not playing
 location-unavailable = Location unavailable
+weather-unavailable =
+    Weather
+    Unavailable
 precipitation = Precip
 none-for-7d = None for 7d
 in = in
