@@ -1,6 +1,6 @@
 # standbyrsd
 <p align="center">
-  <img width="171" height="171" alt="standbyrsd-logo" src="https://github.com/user-attachments/assets/cde85c4f-65bc-4955-b1bb-a734bebd120b" />
+  <img width="171" height="171" alt="standbyrsd-logo" src="https://github.com/gurbbanov/standbyrsd/blob/master/icons/standbyrsd-icon.png" />
 </p>
 
 standbyrsd is simple cross-platform GUI application built with Rust and [Iced](https://github.com/iced-rs/iced)
@@ -13,25 +13,31 @@ standbyrsd is simple cross-platform GUI application built with Rust and [Iced](h
 
 ## screenshots
 ### classic theme:
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/d132fee9-5165-4194-8b96-ddcb38669a6e" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/6705d04a-d3cc-4136-aaf8-08d6a43bdf62" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/cbe2a4b9-fad6-447a-93ca-1586a75c16d5" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/db618beb-e0a7-4bd9-93bd-38e291f665f6" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/ecdc2081-c350-41b2-a860-7468cbe935fa" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/0decab1e-ce4d-4626-8a22-84f641658af4" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/207da7ce-7aa6-4dcb-97e7-dfe239e617e9" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/4aa35f25-ea62-401b-8cce-5b0e969046c6" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/716539fd-d0ef-4852-a7e7-b41cc73f08ad" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/6904fdad-f3d3-42ab-ad85-0e7324a6539e" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/1a629aa3-68e1-4882-bfe9-ee6bc8396d97" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/59668ab0-033f-4582-8915-07b35fc1e1c1" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/daf83d32-bcc4-485a-b1bc-8d6357b07a60" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/86857dcb-75ab-409e-9b4b-ef602cc6c71b" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/3c7a9d38-e916-4857-8f5f-4c18aa726a9e" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/df55bf92-a621-4d26-9c9f-b749da31a86b" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/1f6b3258-a64a-4e55-889a-c3a459529460" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/626005eb-2153-40c8-9f15-4ea0d8004328" />
+<br></br>
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/7633764e-f5b5-43b0-b2f5-a3cf62254e26" />
 
 ### dark theme:
-<img width="1919" height="1077" alt="image" src="https://github.com/user-attachments/assets/d40a0431-02ca-489b-b2d4-627b836061f3" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/2db36904-45f0-40ed-8e07-79d3cb966930" />
 <br></br>
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/abcf9d54-a690-4f39-a157-aaa23dab321b" />
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/5e25314e-ddb8-4d28-ac85-c6294e1443c4" />
+<br></br>
+<img width="1918" height="1079" alt="image" src="https://github.com/user-attachments/assets/c947f26d-5aa6-4e69-985f-d6aeb650d014" />
+<br></br>
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/fd5d1773-b7a7-49ea-8ec1-6ba2bf27b2db" />
