@@ -199,6 +199,8 @@ enum Message {
     WeatherFetched(WeatherStatus),
     OpenMainWindow,
     WindowOpened(Id),
+    WindowClosed(Id),
+    Quit,
     AnimateGradientC1(iced_anim::Event<Color>),
     AnimateGradientC2(iced_anim::Event<Color>),
     AnimateTheme(iced_anim::Event<Theme>),
@@ -342,6 +344,13 @@ impl Application {
                 self.main_window = Some(id);
                 Task::none()
             }
+            Message::WindowClosed(id) => {
+                if Some(id) == self.main_window {
+                    return Task::done(Message::Quit);
+                }
+                Task::none()
+            }
+            Message::Quit => iced::exit(),
             Message::GetPlayer => {
                 #[cfg(target_os = "windows")]
                 {
@@ -1409,7 +1418,17 @@ impl Application {
             _ => Subscription::none(),
         };
 
-        Subscription::batch([clock, weather, metadata_update, snap_idle, anim, theme])
+        let window_close = window::close_events().map(Message::WindowClosed);
+
+        Subscription::batch([
+            clock,
+            weather,
+            metadata_update,
+            snap_idle,
+            anim,
+            theme,
+            window_close,
+        ])
     }
 
     fn view(&self, id: Id) -> Element<'_, Message> {
