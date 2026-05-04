@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle --locked
+
+      - name: Bundle .app
+        run: cargo bundle --release --target ${{ matrix.target }}
+
+      - name: Archive .app
+        run: |
+          cd target/${{ matrix.target }}/release/bundle/osx
+          zip -r standbyrsd-${{ matrix.target }}.zip standbyrsd.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/bundle/osx/standbyrsd-${{ matrix.target }}.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: target/x86_64-pc-windows-msvc/release/standbyrsd.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            pkg-config \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libpulse-dev \
+            pulseaudio \
+            imagemagick
+          sudo ldconfig
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle --locked
+
+      - name: Build .deb
+        run: cargo bundle --release --target x86_64-unknown-linux-gnu
+
+      - name: Build tar.gz
+        run: |
+          mkdir standbyrsd-linux
+          cp target/x86_64-unknown-linux-gnu/release/standbyrsd standbyrsd-linux/
+          cp -r icons standbyrsd-linux/
+          tar -czf standbyrsd-linux-x86_64.tar.gz standbyrsd-linux/
+
+      - name: Build AppImage
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          cat > standbyrsd.desktop << EOF
+          [Desktop Entry]
+          Name=standbyrsd
+          Exec=standbyrsd
+          Icon=standbyrsd-icon
+          Type=Application
+          Categories=Utility;
+          EOF
+          convert icons/standbyrsd-icon.png -resize 512x512 /tmp/standbyrsd-icon.png
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable target/x86_64-unknown-linux-gnu/release/standbyrsd \
+            --desktop-file standbyrsd.desktop \
+            --icon-file /tmp/standbyrsd-icon.png \
+            --output appimage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: standbyrsd-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tar
+          path: standbyrsd-linux-x86_64.tar.gz
+
+  release:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**
+          generate_release_notes: true
