@@ -1,6 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use chrono::prelude::*;
+use chrono_tz::Tz;
 use fluent::{FluentBundle, FluentResource};
 use iced::advanced::{
     Clipboard, Renderer as AdvancedRenderer, Shell,
@@ -29,6 +30,7 @@ use reqwest;
 use serde::Deserialize;
 use std::cell::Cell;
 use std::f64::consts::PI;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use unic_langid::langid;
 use volumecontrol;
@@ -71,6 +73,8 @@ const SF_PRO_DISPLAY_BLACK: Font = Font {
 
 const FULLSCREEN_EXIT_SVG: &[u8] = include_bytes!("../icons/fullscreen-exit.svg");
 const FULLSCREEN_ENTER_SVG: &[u8] = include_bytes!("../icons/fullscreen-enter.svg");
+
+static NEXT_WIDGET_ID: AtomicUsize = AtomicUsize::new(0);
 
 pub fn main() -> iced::Result {
     iced::daemon(Application::new, Application::update, Application::view)
@@ -131,7 +135,7 @@ fn ease_spring(t: f32, v0: f32) -> f32 {
 }
 
 struct Application {
-    time: chrono::DateTime<Local>,
+    time: chrono::DateTime<Utc>,
     weather: WeatherStatus,
     page0_left: Vec<AppWidget>,
     page0_right: Vec<AppWidget>,
@@ -194,7 +198,7 @@ impl Default for AppSettings {
 
 #[derive(Debug, Clone)]
 enum Message {
-    Tick(chrono::DateTime<Local>),
+    Tick(chrono::DateTime<Utc>),
     FetchWeather,
     WeatherFetched(WeatherStatus),
     OpenMainWindow,
@@ -211,6 +215,10 @@ enum Message {
     CloseSettings,
     AnimateFullscreenBtn(iced_anim::Event<f32>),
     AnimateSettingsBtn(iced_anim::Event<f32>),
+    WidgetHover(WidgetId, bool),
+    WidgetAnimate(WidgetId, iced_anim::Event<f32>),
+    OpenWidgetPreferences(WidgetId),
+    CloseWidgetPreferences(WidgetId),
     ToggleFullscreen,
     ToggleSmoothTick(bool),
     ApplyTheme(ThemeMode),
@@ -237,6 +245,8 @@ enum Message {
     VolumePreview(f32),
     VolumeCommit(f32),
     LocaleChanged(Locale),
+    WidgetTzChanged(WidgetId, chrono_tz::Tz),
+    WidgetTzInputChanged(WidgetId, String),
     None,
 }
 
@@ -495,7 +505,7 @@ impl Application {
                             is_playing,
                             thumbnail,
                             gradient_colors,
-                            position_origin: chrono::Local::now(),
+                            position_origin: chrono::Utc::now(),
                         })
                     })();
 
@@ -645,7 +655,7 @@ impl Application {
                             if existing.as_ref().map(|e| e.position) == Some(position) {
                                 existing.as_ref()?.position_origin
                             } else {
-                                chrono::Local::now()
+                                chrono::Utc::now()
                             };
 
                         if title_changed {
@@ -1004,6 +1014,18 @@ impl Application {
             }
             Message::AnimateSettingsBtn(e) => {
                 self.settings_btn_hover.update(e);
+                Task::none()
+            }
+            Message::WidgetHover(id, hovered) => {
+                if let Some(AppWidget::Clock(w)) = self.find_widget_mut(id) {
+                    w.hover.set_target(if hovered { 1.0 } else { 0.0 });
+                }
+                Task::none()
+            }
+            Message::WidgetAnimate(id, event) => {
+                if let Some(AppWidget::Clock(w)) = self.find_widget_mut(id) {
+                    w.hover.update(event);
+                }
                 Task::none()
             }
             Message::DragDelta(dx) => {
@@ -1373,6 +1395,18 @@ impl Application {
 
                 Task::none()
             }
+            Message::OpenWidgetPreferences(id) => {
+                if let Some(AppWidget::Clock(w)) = self.find_widget_mut(id) {
+                    w.preferences_open = true;
+                }
+                Task::none()
+            }
+            Message::CloseWidgetPreferences(id) => {
+                if let Some(AppWidget::Clock(w)) = self.find_widget_mut(id) {
+                    w.preferences_open = false;
+                }
+                Task::none()
+            }
             Message::LocaleChanged(locale) => {
                 self.app_settings.locale = locale.clone();
                 self.l10n = L10n::new(self.app_settings.locale.as_str());
@@ -1382,6 +1416,18 @@ impl Application {
                 }
 
                 Task::done(Message::FetchWeather)
+            }
+            Message::WidgetTzChanged(id, tz) => {
+                if let Some(AppWidget::Clock(w)) = self.find_widget_mut(id) {
+                    w.tz = Some(tz);
+                }
+                Task::none()
+            }
+            Message::WidgetTzInputChanged(id, input) => {
+                if let Some(AppWidget::Clock(w)) = self.find_widget_mut(id) {
+                    w.tz_input = input;
+                }
+                Task::none()
             }
             Message::None => Task::none(),
         }
@@ -1393,7 +1439,7 @@ impl Application {
         } else {
             seconds(1)
         })
-        .map(|_| Message::Tick(chrono::Local::now()));
+        .map(|_| Message::Tick(chrono::Utc::now()));
 
         let weather = time::every(seconds(600)).map(|_| Message::FetchWeather);
 
@@ -1509,12 +1555,12 @@ impl Application {
                                             container(
                                                 button(
                                                     container("")
-                                                        .width(Length::Fixed(14.0))
-                                                        .height(Length::Fixed(14.0))
+                                                        .width(Length::Fixed(mn * 0.02))
+                                                        .height(Length::Fixed(mn * 0.02))
                                                 )
                                                 .on_press(Message::CloseSettings)
-                                                .width(Length::Fixed(20.0))
-                                                .height(Length::Fixed(20.0))
+                                                .width(Length::Fixed(mn * 0.02))
+                                                .height(Length::Fixed(mn * 0.02))
                                                 .padding(0)
                                                 .style(|_, status| {
                                                     let color = match status {
@@ -2069,6 +2115,14 @@ impl Application {
 
         vertical_carousel(items, size.width, size.height)
     }
+
+    fn find_widget_mut(&mut self, id: WidgetId) -> Option<&mut AppWidget> {
+        self.page0_left
+            .iter_mut()
+            .chain(self.page0_right.iter_mut())
+            .chain(self.page1_widgets.iter_mut())
+            .find(|w| w.id() == id)
+    }
 }
 
 impl Default for Application {
@@ -2077,7 +2131,7 @@ impl Default for Application {
         let l10n = L10n::new(app_settings.locale.as_str());
 
         Application {
-            time: chrono::Local::now(),
+            time: chrono::Utc::now(),
             weather: WeatherStatus::Loading,
             page0_left: vec![
                 AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueHalf(
@@ -2106,9 +2160,7 @@ impl Default for Application {
                 ))),
             ],
             page0_right: vec![
-                AppWidget::Media(MediaWidget {
-                    style: MediaStyle::MediaHalf(MediaWidgetHalf::default()),
-                }),
+                AppWidget::Media(MediaWidget::default()),
                 AppWidget::Calendar(CalendarWidget::new(CalendarStyle::MonthHalf(
                     MonthCalendarHalf::default(),
                 ))),
@@ -2124,9 +2176,7 @@ impl Default for Application {
                 ))),
             ],
             page1_widgets: vec![
-                AppWidget::Media(MediaWidget {
-                    style: MediaStyle::MediaFull(MediaWidgetFull::default()),
-                }),
+                AppWidget::Media(MediaWidget::default()),
                 AppWidget::Clock(ClockWidget::new(ClockStyle::WorldFull(
                     WorldClockFull::default(),
                 ))),
@@ -2715,7 +2765,7 @@ enum AppWidget {
 impl AppWidget {
     pub fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         weather: &'a WeatherStatus,
         theme: &'a Theme,
         media_metadata: &'a Option<MediaMetadata>,
@@ -2755,6 +2805,15 @@ impl AppWidget {
             AppWidget::Media(w) => w.clear_cache(),
         }
     }
+
+    pub fn id(&self) -> WidgetId {
+        match self {
+            AppWidget::Calendar(w) => w.id,
+            AppWidget::Clock(w) => w.id,
+            AppWidget::Media(w) => w.id,
+            AppWidget::Weather(w) => w.id,
+        }
+    }
 }
 
 trait ClearCache {
@@ -2762,15 +2821,19 @@ trait ClearCache {
 }
 
 struct CalendarWidget {
+    id: WidgetId,
     style: CalendarStyle,
 }
 
 impl CalendarWidget {
     fn new(style: CalendarStyle) -> Self {
-        Self { style }
+        Self {
+            id: WidgetId::new(),
+            style: style,
+        }
     }
 
-    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Utc>) -> Element<'a, Message> {
         self.style.view(l10n, time)
     }
 }
@@ -2787,7 +2850,7 @@ enum CalendarStyle {
 }
 
 impl CalendarStyle {
-    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Utc>) -> Element<'a, Message> {
         match self {
             CalendarStyle::MonthHalf(c) => c.view(l10n, time),
             CalendarStyle::DateHalf(c) => c.view(l10n, time),
@@ -2811,7 +2874,7 @@ struct MonthCalendarHalf {
 }
 
 impl MonthCalendarHalf {
-    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Utc>) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
             self.cache.clear();
@@ -2824,7 +2887,7 @@ impl MonthCalendarHalf {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a L10n, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message> for (&'a MonthCalendarHalf, &'a L10n, &'a DateTime<Utc>) {
     type State = ();
 
     fn draw(
@@ -2958,7 +3021,7 @@ struct DateCalendarHalf {
 }
 
 impl DateCalendarHalf {
-    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, l10n: &'a L10n, time: &'a DateTime<Utc>) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
             self.cache.clear();
@@ -2971,7 +3034,7 @@ impl DateCalendarHalf {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a L10n, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a L10n, &'a DateTime<Utc>) {
     type State = ();
 
     fn draw(
@@ -3028,33 +3091,268 @@ impl<'a> canvas::Program<Message> for (&'a DateCalendarHalf, &'a L10n, &'a DateT
 }
 
 struct ClockWidget {
+    id: WidgetId,
     style: ClockStyle,
+    hover: Animated<f32>,
+    preferences_open: bool,
+    tz: Option<chrono_tz::Tz>,
+    tz_input: String,
+    tz_combo: combo_box::State<chrono_tz::Tz>,
 }
 
 impl Default for ClockWidget {
     fn default() -> Self {
         Self {
+            id: WidgetId::new(),
             style: ClockStyle::AnalogueHalf(AnalogueClockHalf::default()),
+            hover: Animated::new(
+                0.0f32,
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
+            preferences_open: false,
+            tz: None,
+            tz_input: String::new(),
+            tz_combo: combo_box::State::new(chrono_tz::TZ_VARIANTS.to_vec()),
         }
     }
 }
 
 impl ClockWidget {
     fn new(style: ClockStyle) -> Self {
-        Self { style }
+        Self {
+            id: WidgetId::new(),
+            style: style,
+            hover: Animated::new(
+                0.0f32,
+                Easing::EASE.with_duration(Duration::from_millis(1500)),
+            ),
+            preferences_open: false,
+            tz: None,
+            tz_input: String::new(),
+            tz_combo: combo_box::State::new(chrono_tz::TZ_VARIANTS.to_vec()),
+        }
     }
 
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         weather: &'a WeatherStatus,
         theme: &'a Theme,
         size: Size,
         smooth_tick: bool,
         l10n: &'a L10n,
     ) -> Element<'a, Message> {
-        self.style
-            .view(time, weather, theme, size, smooth_tick, l10n)
+        match self.style {
+            ClockStyle::DigitalCityHalf(_)
+            | ClockStyle::AnalogueCityHalf(_)
+            | ClockStyle::MinimalCityHalf(_)
+            | ClockStyle::AnalogueRectCityHalf(_) => {
+                let id = self.id;
+
+                let sh = size.height;
+                let sw = size.width;
+
+                let primary = theme.palette().primary;
+
+                let t_btn = *self.hover.value();
+                let btn_color = Color {
+                    r: primary.r * t_btn + 0.0 * (1.0 - t_btn),
+                    g: primary.g * t_btn + 0.0 * (1.0 - t_btn),
+                    b: primary.b * t_btn + 0.0 * (1.0 - t_btn),
+                    a: 1.0,
+                };
+
+                stack![
+                    self.style
+                        .view(time, &self.tz, weather, theme, size, smooth_tick, l10n),
+                    Animation::new(
+                        &self.hover,
+                        container(
+                            iced::widget::mouse_area(
+                                button(
+                                    svg(svg::Handle::from_memory(include_bytes!(
+                                        "../icons/brush.svg"
+                                    )))
+                                    .style(move |_theme: &Theme, _status| svg::Style {
+                                        color: Some(btn_color),
+                                        ..Default::default()
+                                    })
+                                    .width(Length::Fixed(sw.min(sh) * 0.1 * t_btn.max(0.3)))
+                                    .height(Length::Fixed(sw.min(sh) * 0.1 * t_btn.max(0.3))),
+                                )
+                                .style(|_, _| button::Style {
+                                    background: None,
+                                    ..Default::default()
+                                })
+                                .on_press(Message::OpenWidgetPreferences(id))
+                            )
+                            .on_enter(Message::WidgetHover(id, true))
+                            .on_exit(Message::WidgetHover(id, false)),
+                        )
+                        .padding(Padding::new(sw.min(sh) * 0.03))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(Alignment::Start)
+                        .align_y(Alignment::End)
+                    )
+                    .on_update(move |e| Message::WidgetAnimate(id, e)),
+                    iced::widget::mouse_area(if self.preferences_open {
+                        container(
+                            iced::widget::mouse_area(responsive(move |s| {
+                                let mn = s.height.min(s.width);
+                                container(
+                                    container(
+                                        column![
+                                            row![
+                                                container(
+                                                    text("preferences")
+                                                        .size(mn * 0.05)
+                                                        .color(theme.palette().text)
+                                                )
+                                                .width(Length::Fill)
+                                                .align_x(iced::Alignment::Start),
+                                                container(
+                                                    button(
+                                                        container("")
+                                                            .width(Length::Fixed(mn * 0.02))
+                                                            .height(Length::Fixed(mn * 0.02))
+                                                    )
+                                                    .on_press(Message::CloseWidgetPreferences(id))
+                                                    .width(Length::Fixed(mn * 0.02))
+                                                    .height(Length::Fixed(mn * 0.02))
+                                                    .padding(0)
+                                                    .style(|_, status| {
+                                                        let color = match status {
+                                                            button::Status::Hovered => {
+                                                                Color::from_rgb8(255, 80, 80)
+                                                            }
+                                                            _ => Color::from_rgb8(220, 50, 50),
+                                                        };
+
+                                                        button::Style {
+                                                            background: Some(
+                                                                iced::Background::Color(color),
+                                                            ),
+                                                            border: iced::Border {
+                                                                radius: 10.0.into(),
+                                                                ..Default::default()
+                                                            },
+                                                            ..Default::default()
+                                                        }
+                                                    })
+                                                )
+                                                .width(Length::Shrink)
+                                                .align_x(iced::Alignment::End),
+                                            ]
+                                            .width(Length::Fill),
+                                            row![
+                                                container(
+                                                    text("timezone")
+                                                        .size(mn * 0.022)
+                                                        .color(theme.palette().text)
+                                                )
+                                                .width(Length::Fill)
+                                                .align_x(iced::Alignment::Start),
+                                                container(
+                                                    combo_box(
+                                                        &self.tz_combo,
+                                                        "select timezone",
+                                                        self.tz.as_ref(),
+                                                        move |tz| Message::WidgetTzChanged(id, tz),
+                                                    )
+                                                    .width(Length::Fixed(mn * 0.2))
+                                                    .input_style(move |_t, _status| {
+                                                        iced::widget::text_input::Style {
+                                                            value: theme.palette().text,
+                                                            placeholder: theme.palette().text,
+                                                            selection: theme.palette().primary,
+                                                            background: iced::Background::Color(
+                                                                Color::TRANSPARENT,
+                                                            ),
+                                                            border: iced::Border {
+                                                                color: theme.palette().primary,
+                                                                width: 1.0,
+                                                                radius: 4.0.into(),
+                                                            },
+                                                            icon: theme.palette().text,
+                                                        }
+                                                    })
+                                                    .menu_style(move |_t| {
+                                                        iced::widget::overlay::menu::Style {
+                                                            text_color: theme.palette().text,
+                                                            background: iced::Background::Color(
+                                                                Color::BLACK,
+                                                            ),
+                                                            border: iced::Border {
+                                                                color: theme.palette().primary,
+                                                                width: 1.0,
+                                                                radius: 4.0.into(),
+                                                            },
+                                                            selected_text_color: Color::BLACK,
+                                                            selected_background:
+                                                                iced::Background::Color(
+                                                                    theme.palette().primary,
+                                                                ),
+                                                            shadow: iced::Shadow::default(),
+                                                        }
+                                                    })
+                                                    .size(mn * 0.02)
+                                                )
+                                                .align_x(iced::Alignment::End)
+                                            ]
+                                        ]
+                                        .width(Length::Fill)
+                                        .spacing(s.height * 0.03),
+                                    )
+                                    .padding(mn * 0.015)
+                                    .width(Length::Fixed(mn * 0.7))
+                                    .height(Length::Fixed(mn * 0.4))
+                                    .style(move |_| {
+                                        container::Style {
+                                            background: Some(iced::Background::Color(
+                                                Color::from_rgb8(23, 23, 23),
+                                            )),
+                                            border: iced::Border {
+                                                radius: (mn * 0.015).into(),
+                                                ..Default::default()
+                                            },
+                                            ..Default::default()
+                                        }
+                                    }),
+                                )
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .align_x(iced::Alignment::Center)
+                                .align_y(iced::Alignment::Center)
+                                .into()
+                            }))
+                            .on_press(Message::None),
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(iced::Alignment::Center)
+                        .align_y(iced::Alignment::Center)
+                        .style(|_| container::Style {
+                            background: Some(iced::Background::Color(Color::from_rgba(
+                                0.0, 0.0, 0.0, 0.5,
+                            ))),
+                            ..Default::default()
+                        })
+                    } else {
+                        container(text(""))
+                            .width(Length::Fixed(0.0))
+                            .height(Length::Fixed(0.0))
+                            .into()
+                    })
+                    .on_press(Message::None)
+                    .on_scroll(|_| Message::None)
+                ]
+                .into()
+            }
+            _ => self
+                .style
+                .view(time, &self.tz, weather, theme, size, smooth_tick, l10n),
+        }
     }
 }
 
@@ -3080,7 +3378,8 @@ enum ClockStyle {
 impl ClockStyle {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
         weather: &'a WeatherStatus,
         theme: &'a Theme,
         size: Size,
@@ -3089,20 +3388,20 @@ impl ClockStyle {
     ) -> Element<'a, Message> {
         match self {
             ClockStyle::DigitalHalf(clock) => clock.view(time),
-            ClockStyle::DigitalCityHalf(clock) => clock.view(time, weather, size, theme),
-            ClockStyle::AnalogueHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::DigitalCityHalf(clock) => clock.view(time, tz, weather, size, theme),
+            ClockStyle::AnalogueHalf(clock) => clock.view(time, tz, smooth_tick),
             ClockStyle::AnalogueCityHalf(clock) => {
-                clock.view(time, weather, smooth_tick, size, theme)
+                clock.view(time, tz, weather, smooth_tick, size, theme)
             }
-            ClockStyle::MinimalHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::MinimalHalf(clock) => clock.view(time, tz, smooth_tick),
             ClockStyle::MinimalCityHalf(clock) => {
-                clock.view(time, weather, smooth_tick, size, theme)
+                clock.view(time, tz, weather, smooth_tick, size, theme)
             }
-            ClockStyle::AnalogueRectHalf(clock) => clock.view(time, smooth_tick),
+            ClockStyle::AnalogueRectHalf(clock) => clock.view(time, tz, smooth_tick),
             ClockStyle::AnalogueRectCityHalf(clock) => {
-                clock.view(time, weather, smooth_tick, size, theme)
+                clock.view(time, tz, weather, smooth_tick, size, theme)
             }
-            ClockStyle::AnalogueRectFull(clock) => clock.view(time, smooth_tick, l10n),
+            ClockStyle::AnalogueRectFull(clock) => clock.view(time, tz, smooth_tick, l10n),
             ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size, l10n),
         }
     }
@@ -3114,7 +3413,9 @@ impl ClearCache for ClockStyle {
             ClockStyle::AnalogueHalf(clock) => clock.clear_cache(),
             ClockStyle::AnalogueCityHalf(clock) => clock.clear_cache(),
             ClockStyle::MinimalHalf(clock) => clock.clear_cache(),
+            ClockStyle::MinimalCityHalf(clock) => clock.clear_cache(),
             ClockStyle::AnalogueRectHalf(clock) => clock.clear_cache(),
+            ClockStyle::AnalogueRectCityHalf(clock) => clock.clear_cache(),
             ClockStyle::AnalogueRectFull(clock) => clock.clear_cache(),
             ClockStyle::WorldFull(clock) => clock.clear_cache(),
             _ => {}
@@ -3128,7 +3429,7 @@ struct DigitalClockHalf {
 }
 
 impl DigitalClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>) -> Element<'a, Message> {
+    fn view<'a>(&'a self, time: &'a DateTime<Utc>) -> Element<'a, Message> {
         self.cache.clear();
         canvas((self, time))
             .height(Length::Fill)
@@ -3137,7 +3438,7 @@ impl DigitalClockHalf {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Local>) {
+impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Utc>) {
     type State = ();
     fn draw(
         &self,
@@ -3288,7 +3589,8 @@ struct DigitalClockCityHalf {
 impl DigitalClockCityHalf {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
         weather: &'a WeatherStatus,
         size: Size,
         theme: &'a Theme,
@@ -3300,11 +3602,21 @@ impl DigitalClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
-                        .size(scale * 65.0)
-                        .color(theme.palette().primary)
-                        .height(Length::Fixed(scale * 65.0))
-                        .font(SF_PRO_ROUNDED_BLACK),
+                    text(
+                        format!(
+                            "{:.3}",
+                            if let Some(t) = tz {
+                                t.name()
+                            } else {
+                                w.city.as_ref().unwrap()
+                            }
+                        )
+                        .to_uppercase(),
+                    )
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .height(Length::Fixed(scale * 65.0))
+                    .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 1050.0 * scale))
                 .width(Length::Fill)
@@ -3378,8 +3690,17 @@ struct AnalogueClockHalf {
 }
 
 impl AnalogueClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
-        stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)].into()
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
+        smooth_tick: bool,
+    ) -> Element<'a, Message> {
+        stack![
+            self.clock_frame.view(),
+            self.hands.view(time, tz, smooth_tick)
+        ]
+        .into()
     }
 }
 
@@ -3395,17 +3716,22 @@ struct Hands {
 }
 
 impl Hands {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
+        smooth_tick: bool,
+    ) -> Element<'a, Message> {
         self.cache.clear();
 
-        canvas((self, time, smooth_tick))
+        canvas((self, time, tz, smooth_tick))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>, bool) {
+impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<Tz>, bool) {
     type State = ();
 
     fn draw(
@@ -3417,7 +3743,13 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Local>, bool) {
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let palette = theme.palette();
-        let (widget, now, smooth_tick) = self;
+        let (widget, now, tz, smooth_tick) = self;
+
+        let now = if let Some(t) = tz {
+            now.with_timezone(t).fixed_offset()
+        } else {
+            now.with_timezone(&Local).fixed_offset()
+        };
 
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let center = frame.center();
@@ -3751,7 +4083,8 @@ struct AnalogueClockCityHalf {
 impl AnalogueClockCityHalf {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
         weather: &'a WeatherStatus,
         smooth_tick: bool,
         size: Size,
@@ -3764,11 +4097,21 @@ impl AnalogueClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
-                        .size(scale * 65.0)
-                        .color(theme.palette().primary)
-                        .height(Length::Fixed(scale * 65.0))
-                        .font(SF_PRO_ROUNDED_BLACK),
+                    text(
+                        format!(
+                            "{:.3}",
+                            if let Some(t) = tz {
+                                t.name()
+                            } else {
+                                w.city.as_ref().unwrap()
+                            }
+                        )
+                        .to_uppercase(),
+                    )
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .height(Length::Fixed(scale * 65.0))
+                    .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
                 .width(Length::Fill)
@@ -3826,7 +4169,10 @@ impl AnalogueClockCityHalf {
         stack![
             city_label,
             temp_label,
-            stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)],
+            stack![
+                self.clock_frame.view(),
+                self.hands.view(time, tz, smooth_tick)
+            ],
         ]
         .width(Length::Fill)
         .into()
@@ -3846,8 +4192,17 @@ struct MinimalClockHalf {
 }
 
 impl MinimalClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
-        stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)].into()
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
+        smooth_tick: bool,
+    ) -> Element<'a, Message> {
+        stack![
+            self.clock_frame.view(),
+            self.hands.view(time, tz, smooth_tick)
+        ]
+        .into()
     }
 }
 
@@ -3923,7 +4278,8 @@ struct MinimalClockCityHalf {
 impl MinimalClockCityHalf {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
         weather: &'a WeatherStatus,
         smooth_tick: bool,
         size: Size,
@@ -3936,11 +4292,21 @@ impl MinimalClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
-                        .size(scale * 65.0)
-                        .color(theme.palette().primary)
-                        .height(Length::Fixed(scale * 65.0))
-                        .font(SF_PRO_ROUNDED_BLACK),
+                    text(
+                        format!(
+                            "{:.3}",
+                            if let Some(t) = tz {
+                                t.name()
+                            } else {
+                                w.city.as_ref().unwrap()
+                            }
+                        )
+                        .to_uppercase(),
+                    )
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .height(Length::Fixed(scale * 65.0))
+                    .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
                 .width(Length::Fill)
@@ -3998,7 +4364,10 @@ impl MinimalClockCityHalf {
         stack![
             city_label,
             temp_label,
-            stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)],
+            stack![
+                self.clock_frame.view(),
+                self.hands.view(time, tz, smooth_tick)
+            ],
         ]
         .width(Length::Fill)
         .into()
@@ -4018,8 +4387,17 @@ struct AnalogueRectClockHalf {
 }
 
 impl AnalogueRectClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>, smooth_tick: bool) -> Element<'a, Message> {
-        stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)].into()
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
+        smooth_tick: bool,
+    ) -> Element<'a, Message> {
+        stack![
+            self.clock_frame.view(),
+            self.hands.view(time, tz, smooth_tick)
+        ]
+        .into()
     }
 }
 
@@ -4305,7 +4683,8 @@ struct AnalogueRectClockCityHalf {
 impl AnalogueRectClockCityHalf {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
         weather: &'a WeatherStatus,
         smooth_tick: bool,
         size: Size,
@@ -4318,11 +4697,21 @@ impl AnalogueRectClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
-                        .size(scale * 65.0)
-                        .color(theme.palette().primary)
-                        .height(Length::Fixed(scale * 65.0))
-                        .font(SF_PRO_ROUNDED_BLACK),
+                    text(
+                        format!(
+                            "{:.3}",
+                            if let Some(t) = tz {
+                                t.name()
+                            } else {
+                                w.city.as_ref().unwrap()
+                            }
+                        )
+                        .to_uppercase(),
+                    )
+                    .size(scale * 65.0)
+                    .color(theme.palette().primary)
+                    .height(Length::Fixed(scale * 65.0))
+                    .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 750.0 * scale))
                 .width(Length::Fill)
@@ -4380,7 +4769,10 @@ impl AnalogueRectClockCityHalf {
         stack![
             city_label,
             temp_label,
-            stack![self.clock_frame.view(), self.hands.view(time, smooth_tick)],
+            stack![
+                self.clock_frame.view(),
+                self.hands.view(time, tz, smooth_tick)
+            ],
         ]
         .width(Length::Fill)
         .into()
@@ -4402,13 +4794,14 @@ struct AnalogueRectClockFull {
 impl AnalogueRectClockFull {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<Tz>,
         smooth_tick: bool,
         l10n: &'a L10n,
     ) -> Element<'a, Message> {
         stack![
             self.clock_frame.view(time, l10n),
-            self.hands.view(time, smooth_tick)
+            self.hands.view(time, tz, smooth_tick)
         ]
         .into()
     }
@@ -4427,7 +4820,7 @@ struct ClockFrameAnalogueRectFull {
 }
 
 impl ClockFrameAnalogueRectFull {
-    fn view<'a>(&'a self, time: &'a DateTime<Local>, l10n: &'a L10n) -> Element<'a, Message> {
+    fn view<'a>(&'a self, time: &'a DateTime<Utc>, l10n: &'a L10n) -> Element<'a, Message> {
         if time.day() != self.last_day.get() {
             self.last_day.set(time.day());
             self.cache.clear();
@@ -4441,11 +4834,7 @@ impl ClockFrameAnalogueRectFull {
 }
 
 impl<'a> canvas::Program<Message>
-    for (
-        &'a ClockFrameAnalogueRectFull,
-        &'a DateTime<Local>,
-        &'a L10n,
-    )
+    for (&'a ClockFrameAnalogueRectFull, &'a DateTime<Utc>, &'a L10n)
 {
     type State = ();
 
@@ -4716,7 +5105,7 @@ struct WorldClockFull {
 impl WorldClockFull {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         weather: &'a WeatherStatus,
         theme: &'a Theme,
         size: Size,
@@ -4759,7 +5148,7 @@ impl<'a> canvas::Program<Message>
     for (
         &'a WorldClockFull,
         &'a L10n,
-        &'a DateTime<Local>,
+        &'a DateTime<Utc>,
         &'a WeatherStatus,
     )
 {
@@ -5012,12 +5401,14 @@ struct DailyForecast {
 }
 
 struct WeatherWidget {
+    id: WidgetId,
     style: WeatherStyle,
 }
 
 impl Default for WeatherWidget {
     fn default() -> Self {
         Self {
+            id: WidgetId::new(),
             style: WeatherStyle::MinimalHalf(MinimalForecastHalf::default()),
         }
     }
@@ -5025,13 +5416,16 @@ impl Default for WeatherWidget {
 
 impl WeatherWidget {
     fn new(style: WeatherStyle) -> Self {
-        Self { style }
+        Self {
+            id: WidgetId::new(),
+            style: style,
+        }
     }
 
     fn view<'a>(
         &'a self,
         theme: &'a Theme,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         weather: &'a WeatherStatus,
         size: Size,
         l10n: &'a L10n,
@@ -5063,7 +5457,7 @@ enum WeatherStyle {
 impl WeatherStyle {
     fn view<'a>(
         &'a self,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         theme: &'a Theme,
         weather: &'a WeatherStatus,
         size: Size,
@@ -5579,7 +5973,7 @@ impl DailyForecastHalf {
     fn view<'a>(
         &'a self,
         theme: &'a Theme,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         weather: &'a WeatherStatus,
         size: Size,
         l10n: &'a L10n,
@@ -5675,7 +6069,7 @@ impl DailyForecastHalf {
 impl<'a> canvas::Program<Message>
     for (
         &'a DailyForecastHalf,
-        &'a DateTime<Local>,
+        &'a DateTime<Utc>,
         &'a L10n,
         &'a WeatherStatus,
     )
@@ -5896,7 +6290,17 @@ impl<'a> canvas::Program<Message>
 }
 
 struct MediaWidget {
+    id: WidgetId,
     style: MediaStyle,
+}
+
+impl Default for MediaWidget {
+    fn default() -> Self {
+        Self {
+            id: WidgetId::new(),
+            style: MediaStyle::MediaHalf(MediaWidgetHalf::default()),
+        }
+    }
 }
 
 impl MediaWidget {
@@ -5907,7 +6311,7 @@ impl MediaWidget {
         size: Size,
         gc1: Color,
         gc2: Color,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         seek_preview: Option<f32>,
         voluem_preview: Option<f32>,
         volume: f32,
@@ -5947,7 +6351,7 @@ impl MediaStyle {
         size: Size,
         gc1: Color,
         gc2: Color,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         seek_preview: Option<f32>,
         volume_preview: Option<f32>,
         volume: f32,
@@ -6002,7 +6406,7 @@ impl MediaWidgetHalf {
         media_metadata: &'a Option<MediaMetadata>,
         theme: &'a Theme,
         size: Size,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         seek_preview: Option<f32>,
         volume_preview: Option<f32>,
         volume: f32,
@@ -6232,7 +6636,7 @@ impl MediaWidgetFull {
         size: Size,
         gc1: Color,
         gc2: Color,
-        time: &'a DateTime<Local>,
+        time: &'a DateTime<Utc>,
         seek_preview: Option<f32>,
         volume_preview: Option<f32>,
         volume: f32,
@@ -6497,7 +6901,7 @@ struct MediaMetadata {
     is_playing: bool,
     thumbnail: Option<iced::widget::image::Handle>,
     gradient_colors: Option<(Color, Color)>,
-    position_origin: DateTime<Local>,
+    position_origin: DateTime<Utc>,
 }
 
 pub fn weekday_to_number(weekday: &Weekday) -> usize {
@@ -7945,5 +8349,14 @@ impl L10n {
         self.bundle
             .format_pattern(pattern, None, &mut errors)
             .to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WidgetId(usize);
+
+impl WidgetId {
+    fn new() -> Self {
+        Self(NEXT_WIDGET_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
