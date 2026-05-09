@@ -78,3 +78,6 @@ n-a = n/a
 preferences = preferences
 city = city
 search-city = search city...
+temperature-unit = temperature unit
+select-unit = select unit
+speed-unit = speed unit

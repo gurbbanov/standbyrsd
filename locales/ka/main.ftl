@@ -78,3 +78,6 @@ n-a = n/a
 preferences = პარამეტრები
 city = ქალაქი
 search-city = ქალაქის ძებნა...
+temperature-unit = ტემპერატურის ერთეული
+select-unit = ერთეულის არჩევა
+speed-unit = სიჩქარის ერთეული

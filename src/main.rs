@@ -175,6 +175,10 @@ struct AppSettings {
     smooth_tick: bool,
     locale: Locale,
     locale_combo: combo_box::State<Locale>,
+    temperature_unit: TemperatureUnit,
+    temperature_combo: combo_box::State<TemperatureUnit>,
+    speed_unit: SpeedUnit,
+    speed_combo: combo_box::State<SpeedUnit>,
 }
 
 impl Default for AppSettings {
@@ -192,6 +196,13 @@ impl Default for AppSettings {
             smooth_tick: true,
             locale: Locale::En,
             locale_combo: combo_box::State::new(Locale::all()),
+            temperature_unit: TemperatureUnit::default(),
+            temperature_combo: combo_box::State::new(vec![
+                TemperatureUnit::Celsius,
+                TemperatureUnit::Fahrenheit,
+            ]),
+            speed_unit: SpeedUnit::default(),
+            speed_combo: combo_box::State::new(vec![SpeedUnit::KmH, SpeedUnit::Ms, SpeedUnit::Mph]),
         }
     }
 }
@@ -249,6 +260,8 @@ enum Message {
     WidgetCitySearchResults(WidgetId, Vec<GeoResult>),
     WidgetCitySelected(WidgetId, GeoResult),
     WidgetWeatherFetched(WidgetId, WeatherStatus),
+    TemperatureUnitChanged(TemperatureUnit),
+    SpeedUnitChanged(SpeedUnit),
     None,
 }
 
@@ -308,11 +321,13 @@ impl Application {
             }
             Message::FetchWeather => {
                 let locale = self.app_settings.locale.clone();
+                let temp_unit = self.app_settings.temperature_unit.clone();
+                let speed_unit = self.app_settings.speed_unit.clone();
 
                 Task::perform(
                     async move {
                         let mut w = Weather::default();
-                        match w.fetch(&locale).await {
+                        match w.fetch(&locale, &temp_unit, &speed_unit).await {
                             Ok(()) => WeatherStatus::Ok(w),
                             Err(e) => WeatherStatus::Error(e.to_string()),
                         }
@@ -1425,10 +1440,6 @@ impl Application {
                 self.app_settings.locale = locale.clone();
                 self.l10n = L10n::new(self.app_settings.locale.as_str());
 
-                for w in &self.page1_widgets {
-                    w.clear_cache();
-                }
-
                 Task::done(Message::FetchWeather)
             }
             Message::WidgetCityInputChanged(id, input) => {
@@ -1501,6 +1512,16 @@ impl Application {
                     _ => {}
                 }
                 Task::none()
+            }
+            Message::TemperatureUnitChanged(temp_unit) => {
+                self.app_settings.temperature_unit = temp_unit.clone();
+
+                Task::done(Message::FetchWeather)
+            }
+            Message::SpeedUnitChanged(speed_unit) => {
+                self.app_settings.speed_unit = speed_unit.clone();
+
+                Task::done(Message::FetchWeather)
             }
             Message::None => Task::none(),
         }
@@ -1970,6 +1991,116 @@ impl Application {
                                                 .size(mn * 0.02)
                                             )
                                             .align_x(iced::Alignment::End)
+                                        ],
+                                        row![
+                                            container(
+                                                text(self.l10n.get("temperature-unit"))
+                                                    .size(mn * 0.022)
+                                                    .color(theme.palette().text)
+                                            )
+                                            .width(Length::Fill)
+                                            .align_x(iced::Alignment::Start),
+                                            container(
+                                                combo_box(
+                                                    &self.app_settings.temperature_combo,
+                                                    &self.l10n.get("select-unit"),
+                                                    Some(&self.app_settings.temperature_unit),
+                                                    Message::TemperatureUnitChanged,
+                                                )
+                                                .width(Length::Fixed(mn * 0.24))
+                                                .input_style(move |_t, _status| {
+                                                    iced::widget::text_input::Style {
+                                                        value: theme.palette().text,
+                                                        placeholder: theme.palette().text,
+                                                        selection: theme.palette().primary,
+                                                        background: iced::Background::Color(
+                                                            Color::TRANSPARENT,
+                                                        ),
+                                                        border: iced::Border {
+                                                            color: theme.palette().primary,
+                                                            width: 1.0,
+                                                            radius: 4.0.into(),
+                                                        },
+                                                        icon: theme.palette().text,
+                                                    }
+                                                })
+                                                .menu_style(move |_t| {
+                                                    iced::widget::overlay::menu::Style {
+                                                        text_color: theme.palette().text,
+                                                        background: iced::Background::Color(
+                                                            Color::BLACK,
+                                                        ),
+                                                        border: iced::Border {
+                                                            color: theme.palette().primary,
+                                                            width: 1.0,
+                                                            radius: 4.0.into(),
+                                                        },
+                                                        selected_text_color: Color::BLACK,
+                                                        selected_background:
+                                                            iced::Background::Color(
+                                                                theme.palette().primary,
+                                                            ),
+                                                        shadow: iced::Shadow::default(),
+                                                    }
+                                                })
+                                                .size(mn * 0.02)
+                                            )
+                                            .align_x(iced::Alignment::End)
+                                        ],
+                                        row![
+                                            container(
+                                                text(self.l10n.get("speed-unit"))
+                                                    .size(mn * 0.022)
+                                                    .color(theme.palette().text)
+                                            )
+                                            .width(Length::Fill)
+                                            .align_x(iced::Alignment::Start),
+                                            container(
+                                                combo_box(
+                                                    &self.app_settings.speed_combo,
+                                                    &self.l10n.get("select-unit"),
+                                                    Some(&self.app_settings.speed_unit),
+                                                    Message::SpeedUnitChanged,
+                                                )
+                                                .width(Length::Fixed(mn * 0.24))
+                                                .input_style(move |_t, _status| {
+                                                    iced::widget::text_input::Style {
+                                                        value: theme.palette().text,
+                                                        placeholder: theme.palette().text,
+                                                        selection: theme.palette().primary,
+                                                        background: iced::Background::Color(
+                                                            Color::TRANSPARENT,
+                                                        ),
+                                                        border: iced::Border {
+                                                            color: theme.palette().primary,
+                                                            width: 1.0,
+                                                            radius: 4.0.into(),
+                                                        },
+                                                        icon: theme.palette().text,
+                                                    }
+                                                })
+                                                .menu_style(move |_t| {
+                                                    iced::widget::overlay::menu::Style {
+                                                        text_color: theme.palette().text,
+                                                        background: iced::Background::Color(
+                                                            Color::BLACK,
+                                                        ),
+                                                        border: iced::Border {
+                                                            color: theme.palette().primary,
+                                                            width: 1.0,
+                                                            radius: 4.0.into(),
+                                                        },
+                                                        selected_text_color: Color::BLACK,
+                                                        selected_background:
+                                                            iced::Background::Color(
+                                                                theme.palette().primary,
+                                                            ),
+                                                        shadow: iced::Shadow::default(),
+                                                    }
+                                                })
+                                                .size(mn * 0.02)
+                                            )
+                                            .align_x(iced::Alignment::End)
                                         ]
                                     ]
                                     .width(Length::Fill)
@@ -1977,7 +2108,7 @@ impl Application {
                                 )
                                 .padding(mn * 0.015)
                                 .width(Length::Fixed(mn * 0.7))
-                                .height(Length::Fixed(mn * 0.4))
+                                .height(Length::Fixed(mn * 0.5))
                                 .style(move |_| container::Style {
                                     background: Some(iced::Background::Color(Color::from_rgb8(
                                         23, 23, 23,
@@ -2045,6 +2176,7 @@ impl Application {
                     self.volume,
                     self.app_settings.smooth_tick,
                     &self.l10n,
+                    &self.app_settings.speed_unit,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -2069,6 +2201,7 @@ impl Application {
                     self.volume,
                     self.app_settings.smooth_tick,
                     &self.l10n,
+                    &self.app_settings.speed_unit,
                 ))
                 .width(Length::Fixed(sw))
                 .height(Length::Fixed(sh))
@@ -2179,6 +2312,7 @@ impl Application {
                     self.volume,
                     self.app_settings.smooth_tick,
                     &self.l10n,
+                    &self.app_settings.speed_unit,
                 ))
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
@@ -2853,11 +2987,12 @@ impl AppWidget {
         volume: f32,
         smooth_tick: bool,
         l10n: &'a L10n,
+        speed_unit: &'a SpeedUnit,
     ) -> Element<'a, Message> {
         match self {
             AppWidget::Clock(w) => w.view(time, weather, theme, size, smooth_tick, l10n),
             AppWidget::Calendar(w) => w.view(l10n, time),
-            AppWidget::Weather(w) => w.view(theme, time, weather, size, l10n),
+            AppWidget::Weather(w) => w.view(theme, time, weather, size, l10n, speed_unit),
             AppWidget::Media(w) => w.view(
                 media_metadata,
                 theme,
@@ -3723,21 +3858,11 @@ impl DigitalClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(
-                        format!(
-                            "{:.3}",
-                            if let Some(t) = tz {
-                                &t.timezone
-                            } else {
-                                w.city.as_ref().unwrap()
-                            }
-                        )
-                        .to_uppercase(),
-                    )
-                    .size(scale * 65.0)
-                    .color(theme.palette().primary)
-                    .height(Length::Fixed(scale * 65.0))
-                    .font(SF_PRO_ROUNDED_BLACK),
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 1050.0 * scale))
                 .width(Length::Fill)
@@ -4222,21 +4347,11 @@ impl AnalogueClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(
-                        format!(
-                            "{:.3}",
-                            if let Some(t) = tz {
-                                &t.timezone
-                            } else {
-                                w.city.as_ref().unwrap()
-                            }
-                        )
-                        .to_uppercase(),
-                    )
-                    .size(scale * 65.0)
-                    .color(theme.palette().primary)
-                    .height(Length::Fixed(scale * 65.0))
-                    .font(SF_PRO_ROUNDED_BLACK),
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
                 .width(Length::Fill)
@@ -4417,21 +4532,11 @@ impl MinimalClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(
-                        format!(
-                            "{:.3}",
-                            if let Some(t) = tz {
-                                &t.timezone
-                            } else {
-                                w.city.as_ref().unwrap()
-                            }
-                        )
-                        .to_uppercase(),
-                    )
-                    .size(scale * 65.0)
-                    .color(theme.palette().primary)
-                    .height(Length::Fixed(scale * 65.0))
-                    .font(SF_PRO_ROUNDED_BLACK),
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 800.0 * scale))
                 .width(Length::Fill)
@@ -4822,21 +4927,11 @@ impl AnalogueRectClockCityHalf {
         let (city_label, temp_label) = match weather {
             WeatherStatus::Ok(w) => (
                 container(
-                    text(
-                        format!(
-                            "{:.3}",
-                            if let Some(t) = tz {
-                                &t.timezone
-                            } else {
-                                w.city.as_ref().unwrap()
-                            }
-                        )
-                        .to_uppercase(),
-                    )
-                    .size(scale * 65.0)
-                    .color(theme.palette().primary)
-                    .height(Length::Fixed(scale * 65.0))
-                    .font(SF_PRO_ROUNDED_BLACK),
+                    text(format!("{:.3}", w.city.as_ref().unwrap()).to_uppercase())
+                        .size(scale * 65.0)
+                        .color(theme.palette().primary)
+                        .height(Length::Fixed(scale * 65.0))
+                        .font(SF_PRO_ROUNDED_BLACK),
                 )
                 .padding(padding::top(hgh.min(wdt) / 2.0 - 750.0 * scale))
                 .width(Length::Fill)
@@ -5471,7 +5566,12 @@ struct GeoResponse {
 }
 
 impl Weather {
-    async fn fetch(&mut self, lang: &Locale) -> Result<(), reqwest::Error> {
+    async fn fetch(
+        &mut self,
+        lang: &Locale,
+        temp_unit: &TemperatureUnit,
+        speed_unit: &SpeedUnit,
+    ) -> Result<(), reqwest::Error> {
         let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
 
         let info = geolocation::find(&ip).unwrap();
@@ -5489,8 +5589,19 @@ impl Weather {
         .map(|r| r.name)
         .unwrap_or_else(|| info.city.clone());
 
+        let temp_param = match temp_unit {
+            TemperatureUnit::Celsius => "celsius",
+            TemperatureUnit::Fahrenheit => "fahrenheit",
+        };
+
+        let speed_param = match speed_unit {
+            SpeedUnit::KmH => "kmh",
+            SpeedUnit::Ms => "ms",
+            SpeedUnit::Mph => "mph",
+        };
+
         let response: Weather = reqwest::get(
-            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto&language={}", info.latitude, info.longitude, lang),
+            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto&language={}&temperature_unit={}&wind_speed_unit={}", info.latitude, info.longitude, lang, temp_param, speed_param),
         )
         .await?
         .json::<Self>()
@@ -5597,6 +5708,7 @@ impl WeatherWidget {
         weather: &'a WeatherStatus,
         size: Size,
         l10n: &'a L10n,
+        speed_unit: &'a SpeedUnit,
     ) -> Element<'a, Message> {
         let id = self.id;
 
@@ -5619,8 +5731,15 @@ impl WeatherWidget {
         let mn = size.height.min(size.width);
 
         stack![
-            self.style
-                .view(time, theme, weather, &self.custom_weather, size, l10n),
+            self.style.view(
+                time,
+                theme,
+                weather,
+                &self.custom_weather,
+                size,
+                l10n,
+                speed_unit
+            ),
             Animation::new(
                 &self.hover,
                 container(
@@ -5853,12 +5972,13 @@ impl WeatherStyle {
         custom_weather: &'a Option<WeatherStatus>,
         size: Size,
         l10n: &'a L10n,
+        speed_unit: &'a SpeedUnit,
     ) -> Element<'a, Message> {
         let effective_weather = custom_weather.as_ref().unwrap_or(weather);
 
         match self {
             Self::MinimalHalf(w) => w.view(theme, effective_weather, size, l10n),
-            Self::DetailedHalf(w) => w.view(theme, effective_weather, size, l10n),
+            Self::DetailedHalf(w) => w.view(theme, effective_weather, size, l10n, speed_unit),
             Self::DailyHalf(w) => w.view(theme, time, effective_weather, size, l10n),
         }
     }
@@ -6071,6 +6191,7 @@ impl DetailedForecastHalf {
         weather: &'a WeatherStatus,
         size: Size,
         l10n: &'a L10n,
+        speed_unit: &'a SpeedUnit,
     ) -> Element<'a, Message> {
         let w = size.width;
         let h = size.height;
@@ -6118,7 +6239,7 @@ impl DetailedForecastHalf {
         };
 
         stack![
-            canvas((self, l10n, weather))
+            canvas((self, l10n, weather, speed_unit))
                 .width(Length::Fill)
                 .height(Length::Fill),
             container(icon)
@@ -6130,7 +6251,14 @@ impl DetailedForecastHalf {
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a WeatherStatus) {
+impl<'a> canvas::Program<Message>
+    for (
+        &'a DetailedForecastHalf,
+        &'a L10n,
+        &'a WeatherStatus,
+        &'a SpeedUnit,
+    )
+{
     type State = ();
 
     fn draw(
@@ -6141,7 +6269,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a W
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, l10n, weather) = self;
+        let (widget, l10n, weather, speed_unit) = self;
         let palette = theme.palette();
 
         let static_layer = match weather {
@@ -6258,7 +6386,7 @@ impl<'a> canvas::Program<Message> for (&'a DetailedForecastHalf, &'a L10n, &'a W
                     });
 
                     frame.fill_text(canvas::Text {
-                        content: format!("{} {}", current.wind_speed_10m, l10n.get("ms")),
+                        content: format!("{} {}", current.wind_speed_10m, speed_unit),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(
                             w * 0.95,
@@ -8751,5 +8879,39 @@ pub struct WidgetId(usize);
 impl WidgetId {
     fn new() -> Self {
         Self(NEXT_WIDGET_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+enum TemperatureUnit {
+    #[default]
+    Celsius,
+    Fahrenheit,
+}
+
+impl std::fmt::Display for TemperatureUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TemperatureUnit::Celsius => write!(f, "celsius (°C)"),
+            TemperatureUnit::Fahrenheit => write!(f, "fahrenheit (°F)"),
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+enum SpeedUnit {
+    #[default]
+    KmH,
+    Ms,
+    Mph,
+}
+
+impl std::fmt::Display for SpeedUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpeedUnit::KmH => write!(f, "km/h"),
+            SpeedUnit::Ms => write!(f, "m/s"),
+            SpeedUnit::Mph => write!(f, "mph"),
+        }
     }
 }

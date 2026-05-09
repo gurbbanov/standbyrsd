@@ -78,3 +78,6 @@ n-a = n/a
 preferences = tənzimləmələr
 city = şəhər
 search-city = şəhər axtar...
+temperature-unit = temperatur vahidi
+select-unit = vahid seçin
+speed-unit = sürət vahidi

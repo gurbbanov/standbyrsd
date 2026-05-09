@@ -78,3 +78,6 @@ n-a = n/a
 preferences = баптаулар
 city = қала
 search-city = қала іздеу...
+temperature-unit = температура бірлігі
+select-unit = бірлікті таңдау
+speed-unit = жылдамдық бірлігі

@@ -78,3 +78,6 @@ n-a = n/a
 preferences = tercihler
 city = şehir
 search-city = şehir ara...
+temperature-unit = sıcaklık birimi
+select-unit = birim seçin
+speed-unit = hız birimi

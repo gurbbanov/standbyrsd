@@ -78,3 +78,6 @@ n-a = n/a
 preferences = 設定
 city = 都市
 search-city = 都市を検索...
+temperature-unit = 温度単位
+select-unit = 単位を選択
+speed-unit = 速度単位

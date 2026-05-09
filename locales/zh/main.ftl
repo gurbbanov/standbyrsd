@@ -78,3 +78,6 @@ n-a = n/a
 preferences = 偏好设置
 city = 城市
 search-city = 搜索城市...
+temperature-unit = 温度单位
+select-unit = 选择单位
+speed-unit = 速度单位

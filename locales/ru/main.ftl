@@ -78,3 +78,6 @@ n-a = н/д
 preferences = настройки
 city = город
 search-city = найти город...
+temperature-unit = единица температуры
+select-unit = выбрать единицу
+speed-unit = единица скорости
