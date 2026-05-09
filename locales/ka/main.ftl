@@ -75,3 +75,6 @@ blizzard = ქარბუქი
 wintry-mix = ზამთრის შერეული ნალექი
 thunderstorm = ჭექა-ქუხილი
 n-a = n/a
+preferences = პარამეტრები
+city = ქალაქი
+search-city = ქალაქის ძებნა...

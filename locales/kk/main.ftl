@@ -75,3 +75,6 @@ blizzard = Боран
 wintry-mix = Қысқы Аралас Жауын-шашын
 thunderstorm = Найзағайлы Дауыл
 n-a = n/a
+preferences = баптаулар
+city = қала
+search-city = қала іздеу...

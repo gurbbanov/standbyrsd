@@ -75,3 +75,6 @@ blizzard = Метель
 wintry-mix = Зимняя Смесь
 thunderstorm = Гроза
 n-a = н/д
+preferences = настройки
+city = город
+search-city = найти город...

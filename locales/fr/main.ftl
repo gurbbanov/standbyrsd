@@ -75,3 +75,6 @@ blizzard = Blizzard
 wintry-mix = Mélange Hivernal
 thunderstorm = Orage
 n-a = n/a
+preferences = préférences
+city = ville
+search-city = rechercher une ville...

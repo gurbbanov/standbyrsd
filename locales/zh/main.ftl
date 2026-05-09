@@ -75,3 +75,6 @@ blizzard = 暴风雪
 wintry-mix = 冬季混合降水
 thunderstorm = 雷暴
 n-a = n/a
+preferences = 偏好设置
+city = 城市
+search-city = 搜索城市...

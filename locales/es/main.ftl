@@ -75,3 +75,6 @@ blizzard = Ventisca
 wintry-mix = Mezcla Invernal
 thunderstorm = Tormenta
 n-a = n/a
+preferences = preferencias
+city = ciudad
+search-city = buscar ciudad...

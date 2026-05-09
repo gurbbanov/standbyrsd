@@ -75,3 +75,6 @@ blizzard = Tipi
 wintry-mix = Kışlık Karışık Yağış
 thunderstorm = Gök Gürültülü Fırtına
 n-a = n/a
+preferences = tercihler
+city = şehir
+search-city = şehir ara...

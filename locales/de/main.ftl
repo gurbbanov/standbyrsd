@@ -75,3 +75,6 @@ blizzard = Schneesturm
 wintry-mix = Winterlicher Niederschlag
 thunderstorm = Gewitter
 n-a = n/a
+preferences = einstellungen
+city = stadt
+search-city = stadt suchen...

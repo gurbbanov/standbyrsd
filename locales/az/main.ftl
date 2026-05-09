@@ -75,3 +75,6 @@ blizzard = Boran
 wintry-mix = Qış Qarışığı
 thunderstorm = Fırtına
 n-a = n/a
+preferences = tənzimləmələr
+city = şəhər
+search-city = şəhər axtar...

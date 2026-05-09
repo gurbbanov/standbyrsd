@@ -75,3 +75,6 @@ blizzard = 吹雪
 wintry-mix = 冬の混合降水
 thunderstorm = 雷雨
 n-a = n/a
+preferences = 設定
+city = 都市
+search-city = 都市を検索...
