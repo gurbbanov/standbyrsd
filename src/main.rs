@@ -3978,7 +3978,7 @@ impl Hands {
 }
 
 impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<GeoResult>, bool) {
-    type State = ();
+    type State = HandsAnimState;
 
     fn draw(
         &self,
@@ -4009,10 +4009,27 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
             } else {
                 now.second() as f32
             };
-            let minutes_portion = Radians::from(hand_rotation(now.minute(), 60)) / 12.0;
-            let hour_hand_angle = Radians::from(hand_rotation(now.hour(), 12)) + minutes_portion;
-            let minute_angle = hand_rotation(now.minute() * 15 + now.second() / 4, 900);
-            let second_angle = hand_rotation_sec(seconds, 60.0);
+
+            let target_hour = (Radians::from(hand_rotation(now.hour(), 12))
+                + Radians::from(hand_rotation(now.minute(), 60)) / 12.0)
+                .0;
+            let target_min =
+                Radians::from(hand_rotation(now.minute() * 15 + now.second() / 4, 900)).0;
+            let target_sec = hand_rotation_sec(seconds, 60.0).0;
+
+            _state
+                .hour
+                .set(lerp_angle(_state.hour.get(), target_hour, 0.10));
+            _state
+                .minute
+                .set(lerp_angle(_state.minute.get(), target_min, 0.15));
+            _state
+                .second
+                .set(lerp_angle(_state.second.get(), target_sec, 0.25));
+
+            let hour_hand_angle = _state.hour.get();
+            let minute_angle = _state.minute.get();
+            let second_angle = _state.second.get();
 
             frame.translate(Vector::new(center.x, center.y));
 
@@ -4241,6 +4258,13 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
 
         vec![dynamic_layer]
     }
+}
+
+#[derive(Default)]
+pub struct HandsAnimState {
+    hour: std::cell::Cell<f32>,
+    minute: std::cell::Cell<f32>,
+    second: std::cell::Cell<f32>,
 }
 
 #[derive(Default)]
@@ -8914,4 +8938,10 @@ impl std::fmt::Display for SpeedUnit {
             SpeedUnit::Mph => write!(f, "mph"),
         }
     }
+}
+
+fn lerp_angle(current: f32, target: f32, t: f32) -> f32 {
+    let diff = ((target - current + std::f32::consts::TAU * 1.5) % std::f32::consts::TAU)
+        - std::f32::consts::TAU / 2.0;
+    current + diff * t
 }
