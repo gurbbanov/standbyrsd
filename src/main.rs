@@ -3,6 +3,7 @@
 use chrono::prelude::*;
 use chrono_tz::Tz;
 use fluent::{FluentBundle, FluentResource};
+use iana_time_zone::get_timezone;
 use iced::advanced::{
     Clipboard, Renderer as AdvancedRenderer, Shell,
     layout::{self, Layout},
@@ -29,6 +30,7 @@ use media_remote;
 use reqwest;
 use serde::Deserialize;
 use std::cell::Cell;
+use std::f32::consts::TAU;
 use std::f64::consts::PI;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -450,7 +452,7 @@ impl Application {
                                 ),
                                 thumbnail,
                                 gradient_colors,
-                                position_origin: chrono::Local::now(),
+                                position_origin: chrono::Utc::now(),
                             })
                         }.await;
 
@@ -602,7 +604,7 @@ impl Application {
                             let position_origin = if existing.as_ref().map(|e| e.position) == Some(position) {
                                 existing.as_ref()?.position_origin
                             } else {
-                                chrono::Local::now()
+                                chrono::Utc::now()
                             };
 
                             Some(MediaMetadata {
@@ -763,7 +765,7 @@ impl Application {
                             if existing.as_ref().map(|e| e.position) == Some(position) {
                                 existing.as_ref()?.position_origin
                             } else {
-                                chrono::Local::now()
+                                chrono::Utc::now()
                             };
 
                         if title_changed {
@@ -5622,22 +5624,24 @@ impl Weather {
         temp_unit: &TemperatureUnit,
         speed_unit: &SpeedUnit,
     ) -> Result<(), reqwest::Error> {
-        let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
+        let tz = get_timezone().unwrap_or("UTC".to_string());
+        let city_hint = tz.split('/').last().unwrap_or("UTC").replace('_', " ");
 
-        let info = geolocation::find(&ip).unwrap();
-
-        let name = reqwest::get(format!(
+        let geo = reqwest::get(format!(
             "https://geocoding-api.open-meteo.com/v1/search?name={}&language={}&count=1",
-            info.city.replace("\"", ""),
+            city_hint,
             lang.as_str()
         ))
         .await?
         .json::<GeoResponse>()
         .await?
         .results
-        .and_then(|r| r.into_iter().next())
-        .map(|r| r.name)
-        .unwrap_or_else(|| info.city.clone());
+        .and_then(|r| r.into_iter().next());
+
+        let (lat, lon, name) = match geo {
+            Some(r) => (r.latitude, r.longitude, r.name),
+            None => (0.0, 0.0, String::from("Unknown")),
+        };
 
         let temp_param = match temp_unit {
             TemperatureUnit::Celsius => "celsius",
@@ -5651,7 +5655,7 @@ impl Weather {
         };
 
         let response: Weather = reqwest::get(
-            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto&language={}&temperature_unit={}&wind_speed_unit={}", info.latitude, info.longitude, lang, temp_param, speed_param),
+            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=precipitation_probability_max,apparent_temperature_max,apparent_temperature_min,weather_code,uv_index_max,sunset,sunrise,daylight_duration&current=temperature_2m,is_day,wind_speed_10m,precipitation,weather_code,apparent_temperature&past_days=0&forecast_days=7&timezone=auto&language={}&temperature_unit={}&wind_speed_unit={}", lat, lon, lang, temp_param, speed_param),
         )
         .await?
         .json::<Self>()
@@ -5659,7 +5663,7 @@ impl Weather {
 
         *self = Weather {
             city: Some(name),
-            coordinate: Some((info.latitude, info.longitude)),
+            coordinate: Some((lat.to_string(), lon.to_string())),
             ..response
         };
 
@@ -8967,7 +8971,8 @@ impl std::fmt::Display for SpeedUnit {
 }
 
 fn lerp_angle(current: f32, target: f32, t: f32) -> f32 {
-    let diff = ((target - current + std::f32::consts::TAU * 1.5) % std::f32::consts::TAU)
-        - std::f32::consts::TAU / 2.0;
+    let current = current.rem_euclid(TAU);
+    let target = target.rem_euclid(TAU);
+    let diff = ((target - current + TAU * 1.5) % TAU) - TAU / 2.0;
     current + diff * t
 }
