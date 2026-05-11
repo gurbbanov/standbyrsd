@@ -3641,7 +3641,7 @@ impl ClockStyle {
         let effective_weather = custom_weather.as_ref().unwrap_or(weather);
 
         match self {
-            ClockStyle::DigitalHalf(clock) => clock.view(time),
+            ClockStyle::DigitalHalf(clock) => clock.view(time, tz),
             ClockStyle::DigitalCityHalf(clock) => {
                 clock.view(time, tz, effective_weather, size, theme)
             }
@@ -3685,16 +3685,26 @@ struct DigitalClockHalf {
 }
 
 impl DigitalClockHalf {
-    fn view<'a>(&'a self, time: &'a DateTime<Utc>) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<GeoResult>,
+    ) -> Element<'a, Message> {
         self.cache.clear();
-        canvas((self, time))
+        canvas((self, time, tz))
             .height(Length::Fill)
             .width(Length::Fill)
             .into()
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Utc>) {
+impl<'a> canvas::Program<Message>
+    for (
+        &'a DigitalClockHalf,
+        &'a DateTime<Utc>,
+        &'a Option<GeoResult>,
+    )
+{
     type State = ();
     fn draw(
         &self,
@@ -3704,7 +3714,17 @@ impl<'a> canvas::Program<Message> for (&'a DigitalClockHalf, &'a DateTime<Utc>) 
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let (widget, now) = self;
+        let (widget, now, selected_city) = self;
+
+        let now = if let Some(city) = selected_city {
+            if let Ok(tz) = city.timezone.parse::<Tz>() {
+                now.with_timezone(&tz).fixed_offset()
+            } else {
+                now.with_timezone(&Local).fixed_offset()
+            }
+        } else {
+            now.with_timezone(&Local).fixed_offset()
+        };
 
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let palette = theme.palette();
@@ -3917,9 +3937,13 @@ impl DigitalClockCityHalf {
             ),
         };
 
-        stack![city_label, temp_label, stack![self.clock_frame.view(time)],]
-            .width(Length::Fill)
-            .into()
+        stack![
+            city_label,
+            temp_label,
+            stack![self.clock_frame.view(time, tz)],
+        ]
+        .width(Length::Fill)
+        .into()
     }
 }
 
@@ -5408,6 +5432,8 @@ impl<'a> canvas::Program<Message>
     ) -> Vec<canvas::Geometry<Renderer>> {
         let (widget, l10n, time, weather) = self;
         let palette = theme.palette();
+
+        let time = time.with_timezone(&Local);
 
         let static_layer = match weather {
             WeatherStatus::Ok(w) => widget.cache.draw(renderer, bounds.size(), |frame| {
