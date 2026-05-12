@@ -257,6 +257,7 @@ enum Message {
     SeekCommit(f32),
     VolumePreview(f32),
     VolumeCommit(f32),
+    VolumeGet,
     LocaleChanged(Locale),
     WidgetCityInputChanged(WidgetId, String),
     WidgetCitySearchResults(WidgetId, Vec<GeoResult>),
@@ -1412,6 +1413,17 @@ impl Application {
                 });
                 Task::none()
             }
+            Message::VolumeGet => {
+                if self.volume_preview.is_some() {
+                    return Task::none();
+                }
+                if let Ok(device) = volumecontrol::AudioDevice::from_default() {
+                    if let Ok(vol) = device.get_vol() {
+                        self.volume = vol as f32 / 100.0;
+                    }
+                }
+                Task::none()
+            }
             Message::OpenSettings => {
                 self.settings_open = true;
 
@@ -1562,6 +1574,8 @@ impl Application {
 
         let window_close = window::close_events().map(Message::WindowClosed);
 
+        let volume_get = time::every(seconds(2)).map(|_| Message::VolumeGet);
+
         Subscription::batch([
             clock,
             weather,
@@ -1570,6 +1584,7 @@ impl Application {
             anim,
             theme,
             window_close,
+            volume_get,
         ])
     }
 
