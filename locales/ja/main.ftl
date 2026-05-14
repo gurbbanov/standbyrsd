@@ -81,3 +81,6 @@ search-city = 都市を検索...
 temperature-unit = 温度単位
 select-unit = 単位を選択
 speed-unit = 速度単位
+version = バージョン
+updating = 更新中...
+update-to = { $ver } に更新

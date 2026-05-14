@@ -81,3 +81,6 @@ search-city = şəhər axtar...
 temperature-unit = temperatur vahidi
 select-unit = vahid seçin
 speed-unit = sürət vahidi
+version = versiya
+updating = yenilənir...
+update-to = { $ver } versiyasına yenilə

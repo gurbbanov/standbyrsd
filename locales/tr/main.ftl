@@ -81,3 +81,6 @@ search-city = şehir ara...
 temperature-unit = sıcaklık birimi
 select-unit = birim seçin
 speed-unit = hız birimi
+version = sürüm
+updating = güncelleniyor...
+update-to = { $ver } sürümüne güncelle

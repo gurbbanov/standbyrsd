@@ -81,3 +81,6 @@ search-city = ქალაქის ძებნა...
 temperature-unit = ტემპერატურის ერთეული
 select-unit = ერთეულის არჩევა
 speed-unit = სიჩქარის ერთეული
+version = ვერსია
+updating = განახლება...
+update-to = განახლება { $ver }-მდე

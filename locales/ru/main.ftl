@@ -81,3 +81,6 @@ search-city = найти город...
 temperature-unit = единица температуры
 select-unit = выбрать единицу
 speed-unit = единица скорости
+version = версия
+updating = обновление...
+update-to = обновить до { $ver }

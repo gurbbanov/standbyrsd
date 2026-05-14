@@ -81,3 +81,6 @@ search-city = search city...
 temperature-unit = temperature unit
 select-unit = select unit
 speed-unit = speed unit
+version = version
+updating = updating...
+update-to = update to { $ver }

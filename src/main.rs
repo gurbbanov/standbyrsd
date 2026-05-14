@@ -2,7 +2,7 @@
 
 use chrono::prelude::*;
 use chrono_tz::Tz;
-use fluent::{FluentBundle, FluentResource};
+use fluent::{FluentArgs, FluentBundle, FluentResource};
 use iana_time_zone::get_timezone;
 use iced::advanced::{
     Clipboard, Renderer as AdvancedRenderer, Shell,
@@ -28,6 +28,7 @@ use iced_anim::{Animated, Animation, Easing};
 #[cfg(target_os = "macos")]
 use media_remote;
 use reqwest;
+use self_update::cargo_crate_version;
 use serde::Deserialize;
 use std::cell::Cell;
 use std::f32::consts::TAU;
@@ -40,6 +41,8 @@ use volumecontrol;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
 };
+
+pub const CURRENT_VERSION: &str = cargo_crate_version!();
 
 const SF_PRO_EXPANDED_BOLD: Font = Font {
     family: Family::Name("SF Pro"),
@@ -166,6 +169,8 @@ struct Application {
     drag: DragState,
     metadata_updating: bool,
     l10n: L10n,
+    available_update: Option<String>,
+    update_in_progress: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -265,6 +270,10 @@ enum Message {
     WidgetWeatherFetched(WidgetId, WeatherStatus),
     TemperatureUnitChanged(TemperatureUnit),
     SpeedUnitChanged(SpeedUnit),
+    CheckForUpdate,
+    UpdateCheckResult(Option<String>),
+    ApplyUpdate,
+    UpdateApplied(Result<Option<String>, String>),
     None,
 }
 
@@ -276,6 +285,7 @@ impl Application {
                 Task::done(Message::OpenMainWindow),
                 Task::done(Message::GetPlayer),
                 Task::done(Message::FetchWeather),
+                Task::done(Message::CheckForUpdate),
             ]),
         )
     }
@@ -1537,6 +1547,41 @@ impl Application {
 
                 Task::done(Message::FetchWeather)
             }
+            Message::CheckForUpdate => Task::perform(
+                async {
+                    tokio::task::spawn_blocking(|| check_for_update().ok().flatten())
+                        .await
+                        .ok()
+                        .flatten()
+                },
+                Message::UpdateCheckResult,
+            ),
+            Message::UpdateCheckResult(version) => {
+                self.available_update = version;
+                Task::none()
+            }
+            Message::ApplyUpdate => {
+                self.update_in_progress = true;
+                Task::perform(
+                    async {
+                        tokio::task::spawn_blocking(|| apply_update().map_err(|e| e.to_string()))
+                            .await
+                            .unwrap_or_else(|e| Err(e.to_string()))
+                    },
+                    Message::UpdateApplied,
+                )
+            }
+            Message::UpdateApplied(result) => {
+                self.update_in_progress = false;
+
+                if let Ok(Some(_ver)) = result {
+                    std::process::Command::new(std::env::current_exe().unwrap())
+                        .spawn()
+                        .ok();
+                    std::process::exit(0);
+                }
+                Task::none()
+            }
             Message::None => Task::none(),
         }
     }
@@ -2118,6 +2163,35 @@ impl Application {
                                                 .size(mn * 0.02)
                                             )
                                             .align_x(iced::Alignment::End)
+                                        ],
+                                        row![
+                                            container(
+                                                text(self.l10n.get("version"))
+                                                    .size(mn * 0.022)
+                                                    .color(theme.palette().text)
+                                            )
+                                            .width(Length::Fill)
+                                            .align_x(iced::Alignment::Start),
+                                            container(if let Some(ver) = &self.available_update {
+                                                if self.update_in_progress {
+                                                    container(text(self.l10n.get("updating")))
+                                                } else {
+                                                    container(
+                                                        button(text(self.l10n.get_args(
+                                                            "update-to",
+                                                            &[("ver", ver.as_str())],
+                                                        )))
+                                                        .on_press(Message::ApplyUpdate),
+                                                    )
+                                                }
+                                            } else {
+                                                container(
+                                                    text(format!("v{}", CURRENT_VERSION))
+                                                        .size(mn * 0.022)
+                                                        .color(theme.palette().text),
+                                                )
+                                            })
+                                            .align_x(iced::Alignment::End)
                                         ]
                                     ]
                                     .width(Length::Fill)
@@ -2461,6 +2535,8 @@ impl Default for Application {
             drag: DragState::Idle,
             metadata_updating: false,
             l10n: l10n,
+            available_update: None,
+            update_in_progress: false,
         }
     }
 }
@@ -4355,7 +4431,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
                     color: palette.text,
                     align_x: text::Alignment::Center,
                     align_y: alignment::Vertical::Center,
-                    font: SF_PRO_ROUNDED_BLACK,
+                    font: SF_PRO_DISPLAY_BLACK,
                     ..canvas::Text::default()
                 });
             }
@@ -8940,6 +9016,19 @@ impl L10n {
             .format_pattern(pattern, None, &mut errors)
             .to_string()
     }
+
+    fn get_args(&self, key: &str, args: &[(&str, &str)]) -> String {
+        let msg = self.bundle.get_message(key).unwrap();
+        let pattern = msg.value().unwrap();
+        let mut fluent_args = FluentArgs::new();
+        for (k, v) in args {
+            fluent_args.set(*k, *v);
+        }
+        let mut errors = vec![];
+        self.bundle
+            .format_pattern(pattern, Some(&fluent_args), &mut errors)
+            .to_string()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -8990,4 +9079,124 @@ fn lerp_angle(current: f32, target: f32, t: f32) -> f32 {
     let target = target.rem_euclid(TAU);
     let diff = ((target - current + TAU * 1.5) % TAU) - TAU / 2.0;
     current + diff * t
+}
+
+pub fn check_for_update() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let releases = self_update::backends::github::ReleaseList::configure()
+        .repo_owner("gurbbanov")
+        .repo_name("standbyrsd")
+        .build()?
+        .fetch()?;
+
+    let latest = match releases.first() {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let latest_ver = latest.version.trim_start_matches('v');
+
+    if self_update::version::bump_is_greater(CURRENT_VERSION, latest_ver)? {
+        return Ok(Some(latest_ver.to_string()));
+    }
+
+    Ok(None)
+}
+
+pub fn apply_update() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let releases = self_update::backends::github::ReleaseList::configure()
+        .repo_owner("gurbbanov")
+        .repo_name("standbyrsd")
+        .build()?
+        .fetch()?;
+
+    let latest = match releases.first() {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let mut builder = self_update::backends::github::Update::configure();
+    builder
+        .repo_owner("gurbbanov")
+        .repo_name("standbyrsd")
+        .bin_name("standbyrsd")
+        .current_version(CURRENT_VERSION)
+        .no_confirm(true)
+        .target_version_tag(&latest.name);
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        builder.target("aarch64-apple-darwin");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        builder.target("x86_64-apple-darwin");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        builder.target("linux");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        apply_update_windows();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        builder.bin_path_in_archive("standbyrsd.app/Contents/MacOS/standbyrsd");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        builder.bin_path_in_archive("standbyrsd-linux/standbyrsd");
+    }
+
+    let status = builder.build()?.update()?;
+
+    if status.updated() {
+        Ok(Some(status.version().to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn apply_update_windows() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let releases = self_update::backends::github::ReleaseList::configure()
+        .repo_owner("gurbbanov")
+        .repo_name("standbyrsd")
+        .build()?
+        .fetch()?;
+
+    let latest = match releases.first() {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let asset = latest
+        .assets
+        .iter()
+        .find(|a| a.name.ends_with(".exe"))
+        .ok_or("no .exe asset found")?;
+
+    let current_exe = std::env::current_exe()?;
+    let new_exe = current_exe.with_file_name("standbyrsd_new.exe");
+    let bat_path = current_exe.with_file_name("update.bat");
+
+    let mut new_exe_file = std::fs::File::create(&new_exe)?;
+
+    self_update::Download::from_url(&asset.download_url)
+        .set_header(reqwest::header::ACCEPT, "application/octet-stream".parse()?)
+        .download_to(&mut new_exe_file)?;
+
+    let bat = format!(
+        "@echo off\r\ntimeout /t 1 /nobreak >nul\r\nmove /Y \"{new}\" \"{cur}\"\r\nstart \"\" \"{cur}\"\r\ndel \"%~f0\"",
+        new = new_exe.display(),
+        cur = current_exe.display(),
+    );
+    std::fs::write(&bat_path, bat)?;
+
+    std::process::Command::new("cmd")
+        .args(["/C", bat_path.to_str().unwrap()])
+        .spawn()?;
+
+    Ok(Some(latest.version.trim_start_matches('v').to_string()))
 }

@@ -81,3 +81,6 @@ search-city = 搜索城市...
 temperature-unit = 温度单位
 select-unit = 选择单位
 speed-unit = 速度单位
+version = 版本
+updating = 正在更新...
+update-to = 更新至 { $ver }
