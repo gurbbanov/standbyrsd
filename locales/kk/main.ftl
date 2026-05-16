@@ -5,8 +5,7 @@ weather-unavailable =
     Қол Жетімсіз
 precipitation = Жауын
 none-for-7d = 7 күн жоқ
-in = кейін
-day = к
+rain-forecast = { $i } күнде { $v } %
 wind = Жел
 ms = м/с
 uvi = UVI

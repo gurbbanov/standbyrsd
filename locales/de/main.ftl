@@ -4,9 +4,8 @@ weather-unavailable =
     Wetter Nicht
     Verfügbar
 precipitation = Regen
-none-for-7d = Kein Regen 7T
-in = in
-day = t
+none-for-7d = kein regen 7T
+rain-forecast = { $v } % in { $i }T
 wind = Wind
 ms = m/s
 uvi = UVI

@@ -5,8 +5,7 @@ weather-unavailable =
     Disponible
 precipitation = Precip.
 none-for-7d = Sin lluvia 7d
-in = en
-day = d
+rain-forecast = { $v } % en { $i }d
 wind = Viento
 ms = m/s
 uvi = UVI

@@ -5,8 +5,7 @@ weather-unavailable =
     不可用
 precipitation = 降水
 none-for-7d = 7天无降水
-in = 于
-day = 天
+rain-forecast = { $i }天后{ $v } %
 wind = 风
 ms = 米/秒
 uvi = UVI

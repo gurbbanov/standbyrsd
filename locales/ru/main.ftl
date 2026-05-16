@@ -5,8 +5,7 @@ weather-unavailable =
     Недоступна
 precipitation = Осадки
 none-for-7d = Нет 7д
-in = через
-day = д
+rain-forecast = { $v } % через { $i }д
 wind = Ветер
 ms = м/с
 uvi = УФ

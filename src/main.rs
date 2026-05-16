@@ -6566,7 +6566,10 @@ impl<'a> canvas::Program<Message>
                             .enumerate()
                             .find(|(_, num)| **num >= 30.0)
                             .map_or(l10n.get("none-for-7d"), |(i, &v)| {
-                                format!("{} % {} {}{}", v, l10n.get("in"), i, l10n.get("day"))
+                                l10n.get_args("rain-forecast", &[
+                                    ("v", v.to_string().as_str()),
+                                    ("i", i.to_string().as_str()),
+                                ])
                             }),
                         size: Pixels(w.min(h) * 0.08),
                         position: Point::new(

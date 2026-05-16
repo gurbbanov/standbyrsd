@@ -5,8 +5,7 @@ weather-unavailable =
     Yoxdur
 precipitation = Yağış
 none-for-7d = 7 gün yoxdur
-in = ərzində
-day = g
+rain-forecast = { $i }g ərzində { $v } %
 wind = Külək
 ms = m/s
 uvi = UVI

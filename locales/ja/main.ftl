@@ -5,8 +5,7 @@ weather-unavailable =
     天気情報
     なし
 none-for-7d = 7日間降水なし
-in = 後
-day = 日
+rain-forecast = { $i }日後に{ $v } %
 wind = 風
 ms = m/s
 uvi = UVI

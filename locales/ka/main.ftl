@@ -5,8 +5,7 @@ weather-unavailable =
     მიუწვდომელია
 precipitation = ნალექი
 none-for-7d = არა 7დ
-in = -ში
-day = დ
+rain-forecast = { $v } % { $i } დღეში
 wind = ქარი
 ms = მ/წ
 uvi = UVI
