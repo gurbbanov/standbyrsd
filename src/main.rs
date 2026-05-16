@@ -16,7 +16,8 @@ use iced::theme::{Base, Palette};
 use iced::time::{self, milliseconds, seconds};
 use iced::widget::canvas::{Cache, Frame, LineCap, Path, Stroke, stroke};
 use iced::widget::{
-    button, canvas, center, column, combo_box, container, responsive, row, stack, svg, text,
+    button, canvas, center, column, combo_box, container, mouse_area, overlay, responsive, row,
+    scrollable, stack, svg, text, text_input,
 };
 use iced::window::{self, Id};
 use iced::{
@@ -1693,9 +1694,9 @@ impl Application {
 
             stack![
                 main_window,
-                iced::widget::mouse_area(if self.settings_open {
+                mouse_area(if self.settings_open {
                     container(
-                        iced::widget::mouse_area(responsive(move |s| {
+                        mouse_area(responsive(move |s| {
                             let mn = s.height.min(s.width);
                             container(
                                 container(
@@ -1742,75 +1743,93 @@ impl Application {
                                             .align_x(iced::Alignment::End),
                                         ]
                                         .width(Length::Fill),
-                                        column![
-                                            row![
-                                                container(
-                                                    text(self.l10n.get("theme"))
-                                                        .size(mn * 0.022)
-                                                        .color(theme.palette().text)
-                                                )
-                                                .width(Length::Fill)
-                                                .align_x(iced::Alignment::Start),
-                                                container(
-                                                    combo_box(
-                                                        &self.app_settings.theme_mode_combo,
-                                                        &self.l10n.get("select-theme"),
-                                                        Some(&self.app_settings.theme_mode),
-                                                        Message::ThemeModeChanged,
-                                                    )
-                                                    .width(Length::Fixed(mn * 0.24))
-                                                    .input_style(move |_t, _status| {
-                                                        iced::widget::text_input::Style {
-                                                            value: theme.palette().text,
-                                                            placeholder: theme.palette().text,
-                                                            selection: theme.palette().primary,
-                                                            background: iced::Background::Color(
-                                                                Color::TRANSPARENT,
-                                                            ),
-                                                            border: iced::Border {
-                                                                color: theme.palette().primary,
-                                                                width: 1.0,
-                                                                radius: 4.0.into(),
-                                                            },
-                                                            icon: theme.palette().text,
-                                                        }
-                                                    })
-                                                    .menu_style(move |_t| {
-                                                        iced::widget::overlay::menu::Style {
-                                                            text_color: theme.palette().text,
-                                                            background: iced::Background::Color(
-                                                                Color::BLACK,
-                                                            ),
-                                                            border: iced::Border {
-                                                                color: theme.palette().primary,
-                                                                width: 1.0,
-                                                                radius: 4.0.into(),
-                                                            },
-                                                            selected_text_color: Color::BLACK,
-                                                            selected_background:
-                                                                iced::Background::Color(
-                                                                    theme.palette().primary,
-                                                                ),
-                                                            shadow: iced::Shadow::default(),
-                                                        }
-                                                    })
-                                                    .size(mn * 0.02)
-                                                )
-                                                .align_x(iced::Alignment::End)
-                                            ],
-                                            if self.app_settings.theme_mode == ThemeMode::AutoCustom
-                                            {
-                                                row![
-                                                    container(row![
+                                        scrollable(
+                                            column![
+                                                column![
+                                                    row![
                                                         container(
-                                                            text(self.l10n.get("light-at"))
+                                                            text(self.l10n.get("theme"))
                                                                 .size(mn * 0.022)
                                                                 .color(theme.palette().text)
                                                         )
                                                         .width(Length::Fill)
                                                         .align_x(iced::Alignment::Start),
-                                                        container(row![
-                                                            iced::widget::text_input(
+                                                        container(
+                                                            combo_box(
+                                                                &self.app_settings.theme_mode_combo,
+                                                                &self.l10n.get("select-theme"),
+                                                                Some(&self.app_settings.theme_mode),
+                                                                Message::ThemeModeChanged,
+                                                            )
+                                                            .width(Length::Fixed(mn * 0.24))
+                                                            .input_style(move |_t, _status| {
+                                                                text_input::Style {
+                                                                    value: theme.palette().text,
+                                                                    placeholder: theme
+                                                                        .palette()
+                                                                        .text,
+                                                                    selection: theme
+                                                                        .palette()
+                                                                        .primary,
+                                                                    background:
+                                                                        iced::Background::Color(
+                                                                            Color::TRANSPARENT,
+                                                                        ),
+                                                                    border: iced::Border {
+                                                                        color: theme
+                                                                            .palette()
+                                                                            .primary,
+                                                                        width: 1.0,
+                                                                        radius: 4.0.into(),
+                                                                    },
+                                                                    icon: theme.palette().text,
+                                                                }
+                                                            })
+                                                            .menu_style(move |_t| {
+                                                                overlay::menu::Style {
+                                                                    text_color: theme
+                                                                        .palette()
+                                                                        .text,
+                                                                    background:
+                                                                        iced::Background::Color(
+                                                                            Color::BLACK,
+                                                                        ),
+                                                                    border: iced::Border {
+                                                                        color: theme
+                                                                            .palette()
+                                                                            .primary,
+                                                                        width: 1.0,
+                                                                        radius: 4.0.into(),
+                                                                    },
+                                                                    selected_text_color:
+                                                                        Color::BLACK,
+                                                                    selected_background:
+                                                                        iced::Background::Color(
+                                                                            theme.palette().primary,
+                                                                        ),
+                                                                    shadow: iced::Shadow::default(),
+                                                                }
+                                                            })
+                                                            .size(mn * 0.02)
+                                                        )
+                                                        .align_x(iced::Alignment::End)
+                                                    ],
+                                                    if self.app_settings.theme_mode
+                                                        == ThemeMode::AutoCustom
+                                                    {
+                                                        row![
+                                                            container(row![
+                                                                container(
+                                                                    text(self.l10n.get("light-at"))
+                                                                        .size(mn * 0.022)
+                                                                        .color(
+                                                                            theme.palette().text
+                                                                        )
+                                                                )
+                                                                .width(Length::Fill)
+                                                                .align_x(iced::Alignment::Start),
+                                                                container(row![
+                                                            text_input(
                                                                 "22",
                                                                 &self
                                                                     .app_settings
@@ -1827,7 +1846,7 @@ impl Application {
                                                             })
                                                             .width(Length::Fixed(mn * 0.05))
                                                             .style(move |_t, _status| {
-                                                                iced::widget::text_input::Style {
+                                                                text_input::Style {
                                                                     value: theme.palette().text,
                                                                     placeholder: theme
                                                                         .palette()
@@ -1852,7 +1871,7 @@ impl Application {
                                                             text(":")
                                                                 .size(mn * 0.022)
                                                                 .color(theme.palette().text),
-                                                            iced::widget::text_input(
+                                                            text_input(
                                                                 "00",
                                                                 &self
                                                                     .app_settings
@@ -1869,7 +1888,7 @@ impl Application {
                                                             })
                                                             .width(Length::Fixed(mn * 0.05))
                                                             .style(move |_t, _status| {
-                                                                iced::widget::text_input::Style {
+                                                                text_input::Style {
                                                                     value: theme.palette().text,
                                                                     placeholder: theme
                                                                         .palette()
@@ -1892,76 +1911,153 @@ impl Application {
                                                                 }
                                                             })
                                                         ])
-                                                        .align_x(iced::Alignment::End)
-                                                    ])
-                                                    .align_x(iced::Alignment::End)
+                                                                .align_x(iced::Alignment::End)
+                                                            ])
+                                                            .align_x(iced::Alignment::End)
+                                                        ]
+                                                    } else {
+                                                        row![]
+                                                    },
+                                                    if self.app_settings.theme_mode
+                                                        == ThemeMode::AutoCustom
+                                                    {
+                                                        row![
+                                                            container(
+                                                                text(self.l10n.get("dark-at"))
+                                                                    .size(mn * 0.022)
+                                                                    .color(theme.palette().text)
+                                                            )
+                                                            .width(Length::Fill)
+                                                            .align_x(iced::Alignment::Start),
+                                                            container(row![
+                                                                text_input(
+                                                                    "22",
+                                                                    &self
+                                                                        .app_settings
+                                                                        .theme_dark_at
+                                                                        .split(':')
+                                                                        .next()
+                                                                        .unwrap_or("00")
+                                                                )
+                                                                .size(mn * 0.02)
+                                                                .on_input(|s| {
+                                                                    Message::ThemeDarkAtChanged(
+                                                                        s, true,
+                                                                    )
+                                                                })
+                                                                .width(Length::Fixed(mn * 0.05))
+                                                                .style(move |_t, _status| {
+                                                                    text_input::Style {
+                                                                        value: theme.palette().text,
+                                                                        placeholder: theme
+                                                                            .palette()
+                                                                            .text,
+                                                                        selection: theme
+                                                                            .palette()
+                                                                            .danger,
+                                                                        background:
+                                                                            iced::Background::Color(
+                                                                                Color::TRANSPARENT,
+                                                                            ),
+                                                                        border: iced::Border {
+                                                                            color: theme
+                                                                                .palette()
+                                                                                .primary,
+                                                                            width: 1.0,
+                                                                            radius: 4.0.into(),
+                                                                        },
+                                                                        icon: theme.palette().text,
+                                                                    }
+                                                                }),
+                                                                text(":")
+                                                                    .size(mn * 0.022)
+                                                                    .color(theme.palette().text),
+                                                                text_input(
+                                                                    "00",
+                                                                    &self
+                                                                        .app_settings
+                                                                        .theme_dark_at
+                                                                        .split(':')
+                                                                        .nth(1)
+                                                                        .unwrap_or("00")
+                                                                )
+                                                                .size(mn * 0.02)
+                                                                .on_input(|s| {
+                                                                    Message::ThemeDarkAtChanged(
+                                                                        s, false,
+                                                                    )
+                                                                })
+                                                                .width(Length::Fixed(mn * 0.05))
+                                                                .style(move |_t, _status| {
+                                                                    text_input::Style {
+                                                                        value: theme.palette().text,
+                                                                        placeholder: theme
+                                                                            .palette()
+                                                                            .text,
+                                                                        selection: theme
+                                                                            .palette()
+                                                                            .danger,
+                                                                        background:
+                                                                            iced::Background::Color(
+                                                                                Color::TRANSPARENT,
+                                                                            ),
+                                                                        border: iced::Border {
+                                                                            color: theme
+                                                                                .palette()
+                                                                                .primary,
+                                                                            width: 1.0,
+                                                                            radius: 4.0.into(),
+                                                                        },
+                                                                        icon: theme.palette().text,
+                                                                    }
+                                                                }),
+                                                            ])
+                                                            .align_x(iced::Alignment::End)
+                                                        ]
+                                                    } else {
+                                                        row![]
+                                                    },
                                                 ]
-                                            } else {
-                                                row![]
-                                            },
-                                            if self.app_settings.theme_mode == ThemeMode::AutoCustom
-                                            {
+                                                .width(Length::Fill)
+                                                .spacing(mn * 0.01),
                                                 row![
                                                     container(
-                                                        text(self.l10n.get("dark-at"))
+                                                        text(self.l10n.get("smooth-tick"))
                                                             .size(mn * 0.022)
                                                             .color(theme.palette().text)
                                                     )
                                                     .width(Length::Fill)
                                                     .align_x(iced::Alignment::Start),
-                                                    container(row![
-                                                        iced::widget::text_input(
-                                                            "22",
-                                                            &self
-                                                                .app_settings
-                                                                .theme_dark_at
-                                                                .split(':')
-                                                                .next()
-                                                                .unwrap_or("00")
+                                                    container(
+                                                        iced::widget::toggler(
+                                                            self.app_settings.smooth_tick
                                                         )
-                                                        .size(mn * 0.02)
-                                                        .on_input(|s| {
-                                                            Message::ThemeDarkAtChanged(s, true)
-                                                        })
-                                                        .width(Length::Fixed(mn * 0.05))
-                                                        .style(move |_t, _status| {
-                                                            iced::widget::text_input::Style {
-                                                                value: theme.palette().text,
-                                                                placeholder: theme.palette().text,
-                                                                selection: theme.palette().danger,
-                                                                background: iced::Background::Color(
-                                                                    Color::TRANSPARENT,
-                                                                ),
-                                                                border: iced::Border {
-                                                                    color: theme.palette().primary,
-                                                                    width: 1.0,
-                                                                    radius: 4.0.into(),
-                                                                },
-                                                                icon: theme.palette().text,
-                                                            }
-                                                        }),
-                                                        text(":")
+                                                        .size(mn * 0.025)
+                                                        .on_toggle(Message::ToggleSmoothTick)
+                                                    )
+                                                    .align_x(iced::Alignment::End)
+                                                ],
+                                                row![
+                                                    container(
+                                                        text(self.l10n.get("language"))
                                                             .size(mn * 0.022)
-                                                            .color(theme.palette().text),
-                                                        iced::widget::text_input(
-                                                            "00",
-                                                            &self
-                                                                .app_settings
-                                                                .theme_dark_at
-                                                                .split(':')
-                                                                .nth(1)
-                                                                .unwrap_or("00")
+                                                            .color(theme.palette().text)
+                                                    )
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                    container(
+                                                        combo_box(
+                                                            &self.app_settings.locale_combo,
+                                                            &self.l10n.get("select-language"),
+                                                            Some(&self.app_settings.locale),
+                                                            Message::LocaleChanged,
                                                         )
-                                                        .size(mn * 0.02)
-                                                        .on_input(|s| {
-                                                            Message::ThemeDarkAtChanged(s, false)
-                                                        })
-                                                        .width(Length::Fixed(mn * 0.05))
-                                                        .style(move |_t, _status| {
-                                                            iced::widget::text_input::Style {
+                                                        .width(Length::Fixed(mn * 0.2))
+                                                        .input_style(move |_t, _status| {
+                                                            text_input::Style {
                                                                 value: theme.palette().text,
                                                                 placeholder: theme.palette().text,
-                                                                selection: theme.palette().danger,
+                                                                selection: theme.palette().primary,
                                                                 background: iced::Background::Color(
                                                                     Color::TRANSPARENT,
                                                                 ),
@@ -1972,230 +2068,197 @@ impl Application {
                                                                 },
                                                                 icon: theme.palette().text,
                                                             }
-                                                        }),
-                                                    ])
+                                                        })
+                                                        .menu_style(move |_t| {
+                                                            overlay::menu::Style {
+                                                                text_color: theme.palette().text,
+                                                                background: iced::Background::Color(
+                                                                    Color::BLACK,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                selected_text_color: Color::BLACK,
+                                                                selected_background:
+                                                                    iced::Background::Color(
+                                                                        theme.palette().primary,
+                                                                    ),
+                                                                shadow: iced::Shadow::default(),
+                                                            }
+                                                        })
+                                                        .size(mn * 0.02)
+                                                    )
+                                                    .align_x(iced::Alignment::End)
+                                                ],
+                                                row![
+                                                    container(
+                                                        text(self.l10n.get("temperature-unit"))
+                                                            .size(mn * 0.022)
+                                                            .color(theme.palette().text)
+                                                    )
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                    container(
+                                                        combo_box(
+                                                            &self.app_settings.temperature_combo,
+                                                            &self.l10n.get("select-unit"),
+                                                            Some(
+                                                                &self.app_settings.temperature_unit
+                                                            ),
+                                                            Message::TemperatureUnitChanged,
+                                                        )
+                                                        .width(Length::Fixed(mn * 0.24))
+                                                        .input_style(move |_t, _status| {
+                                                            text_input::Style {
+                                                                value: theme.palette().text,
+                                                                placeholder: theme.palette().text,
+                                                                selection: theme.palette().primary,
+                                                                background: iced::Background::Color(
+                                                                    Color::TRANSPARENT,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                icon: theme.palette().text,
+                                                            }
+                                                        })
+                                                        .menu_style(move |_t| {
+                                                            overlay::menu::Style {
+                                                                text_color: theme.palette().text,
+                                                                background: iced::Background::Color(
+                                                                    Color::BLACK,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                selected_text_color: Color::BLACK,
+                                                                selected_background:
+                                                                    iced::Background::Color(
+                                                                        theme.palette().primary,
+                                                                    ),
+                                                                shadow: iced::Shadow::default(),
+                                                            }
+                                                        })
+                                                        .size(mn * 0.02)
+                                                    )
+                                                    .align_x(iced::Alignment::End)
+                                                ],
+                                                row![
+                                                    container(
+                                                        text(self.l10n.get("speed-unit"))
+                                                            .size(mn * 0.022)
+                                                            .color(theme.palette().text)
+                                                    )
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                    container(
+                                                        combo_box(
+                                                            &self.app_settings.speed_combo,
+                                                            &self.l10n.get("select-unit"),
+                                                            Some(&self.app_settings.speed_unit),
+                                                            Message::SpeedUnitChanged,
+                                                        )
+                                                        .width(Length::Fixed(mn * 0.24))
+                                                        .input_style(move |_t, _status| {
+                                                            text_input::Style {
+                                                                value: theme.palette().text,
+                                                                placeholder: theme.palette().text,
+                                                                selection: theme.palette().primary,
+                                                                background: iced::Background::Color(
+                                                                    Color::TRANSPARENT,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                icon: theme.palette().text,
+                                                            }
+                                                        })
+                                                        .menu_style(move |_t| {
+                                                            overlay::menu::Style {
+                                                                text_color: theme.palette().text,
+                                                                background: iced::Background::Color(
+                                                                    Color::BLACK,
+                                                                ),
+                                                                border: iced::Border {
+                                                                    color: theme.palette().primary,
+                                                                    width: 1.0,
+                                                                    radius: 4.0.into(),
+                                                                },
+                                                                selected_text_color: Color::BLACK,
+                                                                selected_background:
+                                                                    iced::Background::Color(
+                                                                        theme.palette().primary,
+                                                                    ),
+                                                                shadow: iced::Shadow::default(),
+                                                            }
+                                                        })
+                                                        .size(mn * 0.02)
+                                                    )
+                                                    .align_x(iced::Alignment::End)
+                                                ],
+                                                row![
+                                                    container(
+                                                        text(self.l10n.get("version"))
+                                                            .size(mn * 0.022)
+                                                            .color(theme.palette().text)
+                                                    )
+                                                    .width(Length::Fill)
+                                                    .align_x(iced::Alignment::Start),
+                                                    container(
+                                                        if let Some(ver) = &self.available_update {
+                                                            if self.update_in_progress {
+                                                                container(text(
+                                                                    self.l10n.get("updating"),
+                                                                ))
+                                                            } else {
+                                                                container(
+                                                                    button(text(
+                                                                        self.l10n.get_args(
+                                                                            "update-to",
+                                                                            &[(
+                                                                                "ver",
+                                                                                ver.as_str(),
+                                                                            )],
+                                                                        ),
+                                                                    ))
+                                                                    .on_press(Message::ApplyUpdate),
+                                                                )
+                                                            }
+                                                        } else {
+                                                            container(
+                                                                text(format!(
+                                                                    "v{}",
+                                                                    CURRENT_VERSION
+                                                                ))
+                                                                .size(mn * 0.022)
+                                                                .color(theme.palette().text),
+                                                            )
+                                                        }
+                                                    )
                                                     .align_x(iced::Alignment::End)
                                                 ]
-                                            } else {
-                                                row![]
-                                            },
-                                        ]
-                                        .width(Length::Fill)
-                                        .spacing(mn * 0.01),
-                                        row![
-                                            container(
-                                                text(self.l10n.get("smooth-tick"))
-                                                    .size(mn * 0.022)
-                                                    .color(theme.palette().text)
-                                            )
+                                            ]
                                             .width(Length::Fill)
-                                            .align_x(iced::Alignment::Start),
-                                            container(
-                                                iced::widget::toggler(
-                                                    self.app_settings.smooth_tick
-                                                )
-                                                .size(mn * 0.025)
-                                                .on_toggle(Message::ToggleSmoothTick)
+                                            .spacing(s.height * 0.03),
+                                        )
+                                        .direction(
+                                            scrollable::Direction::Vertical(
+                                                scrollable::Scrollbar::new()
+                                                    .width(0)
+                                                    .scroller_width(0)
                                             )
-                                            .align_x(iced::Alignment::End)
-                                        ],
-                                        row![
-                                            container(
-                                                text(self.l10n.get("language"))
-                                                    .size(mn * 0.022)
-                                                    .color(theme.palette().text)
-                                            )
-                                            .width(Length::Fill)
-                                            .align_x(iced::Alignment::Start),
-                                            container(
-                                                combo_box(
-                                                    &self.app_settings.locale_combo,
-                                                    &self.l10n.get("select-language"),
-                                                    Some(&self.app_settings.locale),
-                                                    Message::LocaleChanged,
-                                                )
-                                                .width(Length::Fixed(mn * 0.2))
-                                                .input_style(move |_t, _status| {
-                                                    iced::widget::text_input::Style {
-                                                        value: theme.palette().text,
-                                                        placeholder: theme.palette().text,
-                                                        selection: theme.palette().primary,
-                                                        background: iced::Background::Color(
-                                                            Color::TRANSPARENT,
-                                                        ),
-                                                        border: iced::Border {
-                                                            color: theme.palette().primary,
-                                                            width: 1.0,
-                                                            radius: 4.0.into(),
-                                                        },
-                                                        icon: theme.palette().text,
-                                                    }
-                                                })
-                                                .menu_style(move |_t| {
-                                                    iced::widget::overlay::menu::Style {
-                                                        text_color: theme.palette().text,
-                                                        background: iced::Background::Color(
-                                                            Color::BLACK,
-                                                        ),
-                                                        border: iced::Border {
-                                                            color: theme.palette().primary,
-                                                            width: 1.0,
-                                                            radius: 4.0.into(),
-                                                        },
-                                                        selected_text_color: Color::BLACK,
-                                                        selected_background:
-                                                            iced::Background::Color(
-                                                                theme.palette().primary,
-                                                            ),
-                                                        shadow: iced::Shadow::default(),
-                                                    }
-                                                })
-                                                .size(mn * 0.02)
-                                            )
-                                            .align_x(iced::Alignment::End)
-                                        ],
-                                        row![
-                                            container(
-                                                text(self.l10n.get("temperature-unit"))
-                                                    .size(mn * 0.022)
-                                                    .color(theme.palette().text)
-                                            )
-                                            .width(Length::Fill)
-                                            .align_x(iced::Alignment::Start),
-                                            container(
-                                                combo_box(
-                                                    &self.app_settings.temperature_combo,
-                                                    &self.l10n.get("select-unit"),
-                                                    Some(&self.app_settings.temperature_unit),
-                                                    Message::TemperatureUnitChanged,
-                                                )
-                                                .width(Length::Fixed(mn * 0.24))
-                                                .input_style(move |_t, _status| {
-                                                    iced::widget::text_input::Style {
-                                                        value: theme.palette().text,
-                                                        placeholder: theme.palette().text,
-                                                        selection: theme.palette().primary,
-                                                        background: iced::Background::Color(
-                                                            Color::TRANSPARENT,
-                                                        ),
-                                                        border: iced::Border {
-                                                            color: theme.palette().primary,
-                                                            width: 1.0,
-                                                            radius: 4.0.into(),
-                                                        },
-                                                        icon: theme.palette().text,
-                                                    }
-                                                })
-                                                .menu_style(move |_t| {
-                                                    iced::widget::overlay::menu::Style {
-                                                        text_color: theme.palette().text,
-                                                        background: iced::Background::Color(
-                                                            Color::BLACK,
-                                                        ),
-                                                        border: iced::Border {
-                                                            color: theme.palette().primary,
-                                                            width: 1.0,
-                                                            radius: 4.0.into(),
-                                                        },
-                                                        selected_text_color: Color::BLACK,
-                                                        selected_background:
-                                                            iced::Background::Color(
-                                                                theme.palette().primary,
-                                                            ),
-                                                        shadow: iced::Shadow::default(),
-                                                    }
-                                                })
-                                                .size(mn * 0.02)
-                                            )
-                                            .align_x(iced::Alignment::End)
-                                        ],
-                                        row![
-                                            container(
-                                                text(self.l10n.get("speed-unit"))
-                                                    .size(mn * 0.022)
-                                                    .color(theme.palette().text)
-                                            )
-                                            .width(Length::Fill)
-                                            .align_x(iced::Alignment::Start),
-                                            container(
-                                                combo_box(
-                                                    &self.app_settings.speed_combo,
-                                                    &self.l10n.get("select-unit"),
-                                                    Some(&self.app_settings.speed_unit),
-                                                    Message::SpeedUnitChanged,
-                                                )
-                                                .width(Length::Fixed(mn * 0.24))
-                                                .input_style(move |_t, _status| {
-                                                    iced::widget::text_input::Style {
-                                                        value: theme.palette().text,
-                                                        placeholder: theme.palette().text,
-                                                        selection: theme.palette().primary,
-                                                        background: iced::Background::Color(
-                                                            Color::TRANSPARENT,
-                                                        ),
-                                                        border: iced::Border {
-                                                            color: theme.palette().primary,
-                                                            width: 1.0,
-                                                            radius: 4.0.into(),
-                                                        },
-                                                        icon: theme.palette().text,
-                                                    }
-                                                })
-                                                .menu_style(move |_t| {
-                                                    iced::widget::overlay::menu::Style {
-                                                        text_color: theme.palette().text,
-                                                        background: iced::Background::Color(
-                                                            Color::BLACK,
-                                                        ),
-                                                        border: iced::Border {
-                                                            color: theme.palette().primary,
-                                                            width: 1.0,
-                                                            radius: 4.0.into(),
-                                                        },
-                                                        selected_text_color: Color::BLACK,
-                                                        selected_background:
-                                                            iced::Background::Color(
-                                                                theme.palette().primary,
-                                                            ),
-                                                        shadow: iced::Shadow::default(),
-                                                    }
-                                                })
-                                                .size(mn * 0.02)
-                                            )
-                                            .align_x(iced::Alignment::End)
-                                        ],
-                                        row![
-                                            container(
-                                                text(self.l10n.get("version"))
-                                                    .size(mn * 0.022)
-                                                    .color(theme.palette().text)
-                                            )
-                                            .width(Length::Fill)
-                                            .align_x(iced::Alignment::Start),
-                                            container(if let Some(ver) = &self.available_update {
-                                                if self.update_in_progress {
-                                                    container(text(self.l10n.get("updating")))
-                                                } else {
-                                                    container(
-                                                        button(text(self.l10n.get_args(
-                                                            "update-to",
-                                                            &[("ver", ver.as_str())],
-                                                        )))
-                                                        .on_press(Message::ApplyUpdate),
-                                                    )
-                                                }
-                                            } else {
-                                                container(
-                                                    text(format!("v{}", CURRENT_VERSION))
-                                                        .size(mn * 0.022)
-                                                        .color(theme.palette().text),
-                                                )
-                                            })
-                                            .align_x(iced::Alignment::End)
-                                        ]
+                                        )
                                     ]
                                     .width(Length::Fill)
-                                    .spacing(s.height * 0.03),
+                                    .spacing(s.height * 0.035),
                                 )
                                 .padding(mn * 0.015)
                                 .width(Length::Fixed(mn * 0.7))
@@ -2324,7 +2387,7 @@ impl Application {
         container(stack![
             row![left, right],
             container(
-                iced::widget::mouse_area(
+                mouse_area(
                     button(
                         svg(svg::Handle::from_memory(if self.fullscreen {
                             FULLSCREEN_EXIT_SVG
@@ -2353,7 +2416,7 @@ impl Application {
             .align_x(Alignment::End)
             .align_y(Alignment::Start),
             container(
-                iced::widget::mouse_area(
+                mouse_area(
                     button(
                         svg(svg::Handle::from_memory(include_bytes!(
                             "../icons/settings.svg"
@@ -3489,7 +3552,7 @@ impl ClockWidget {
                     Animation::new(
                         &self.hover,
                         container(
-                            iced::widget::mouse_area(
+                            mouse_area(
                                 button(
                                     svg(svg::Handle::from_memory(include_bytes!(
                                         "../icons/brush.svg"
@@ -3517,9 +3580,9 @@ impl ClockWidget {
                         .align_y(Alignment::End)
                     )
                     .on_update(move |e| Message::WidgetAnimate(id, e)),
-                    iced::widget::mouse_area(if self.preferences_open {
+                    mouse_area(if self.preferences_open {
                         container(
-                            iced::widget::mouse_area(
+                            mouse_area(
                                 container(
                                     container(
                                         column![
@@ -3574,7 +3637,7 @@ impl ClockWidget {
                                                 .width(Length::Fill)
                                                 .align_x(iced::Alignment::Start),
                                                 container(column![
-                                                    iced::widget::text_input(
+                                                    text_input(
                                                         search_placeholder.as_str(),
                                                         &self.city_input
                                                     )
@@ -3583,7 +3646,7 @@ impl ClockWidget {
                                                     })
                                                     .width(Length::Fixed(mn * 0.2))
                                                     .style(move |_t, _status| {
-                                                        iced::widget::text_input::Style {
+                                                        text_input::Style {
                                                             value: theme.palette().text,
                                                             placeholder: theme.palette().text,
                                                             selection: theme.palette().primary,
@@ -5888,7 +5951,7 @@ impl WeatherWidget {
             Animation::new(
                 &self.hover,
                 container(
-                    iced::widget::mouse_area(
+                    mouse_area(
                         button(
                             svg(svg::Handle::from_memory(include_bytes!(
                                 "../icons/brush.svg"
@@ -5916,9 +5979,9 @@ impl WeatherWidget {
                 .align_y(Alignment::End)
             )
             .on_update(move |e| Message::WidgetAnimate(id, e)),
-            iced::widget::mouse_area(if self.preferences_open {
+            mouse_area(if self.preferences_open {
                 container(
-                    iced::widget::mouse_area(
+                    mouse_area(
                         container(
                             container(
                                 column![
@@ -5975,7 +6038,7 @@ impl WeatherWidget {
                                         .width(Length::Fill)
                                         .align_x(iced::Alignment::Start),
                                         container(column![
-                                            iced::widget::text_input(
+                                            text_input(
                                                 search_placeholder.as_str(),
                                                 &self.city_input
                                             )
@@ -5984,7 +6047,7 @@ impl WeatherWidget {
                                             })
                                             .width(Length::Fixed(mn * 0.2))
                                             .style(move |_t, _status| {
-                                                iced::widget::text_input::Style {
+                                                text_input::Style {
                                                     value: theme.palette().text,
                                                     placeholder: theme.palette().text,
                                                     selection: theme.palette().primary,
@@ -7241,14 +7304,14 @@ impl MediaWidgetHalf {
                     .size(s * 0.05)
                     .font(SF_PRO_DISPLAY_BOLD)
                     .width(Length::Fixed(s * 0.4))
-                    .shaping(iced::widget::text::Shaping::Advanced)
-                    .wrapping(iced::widget::text::Wrapping::None)
+                    .shaping(text::Shaping::Advanced)
+                    .wrapping(text::Wrapping::None)
                     .color(palette.text),
                 text(artist)
                     .size(s * 0.03)
                     .width(Length::Fixed(s * 0.4))
-                    .shaping(iced::widget::text::Shaping::Advanced)
-                    .wrapping(iced::widget::text::Wrapping::None)
+                    .shaping(text::Shaping::Advanced)
+                    .wrapping(text::Wrapping::None)
                     .font(SF_PRO_DISPLAY_BOLD)
                     .color(palette.primary),
             ]
@@ -7469,15 +7532,15 @@ impl MediaWidgetFull {
                         .font(SF_PRO_DISPLAY_BOLD)
                         .color(palette.text)
                         .width(Length::Fixed(s * 0.8))
-                        .shaping(iced::widget::text::Shaping::Advanced)
-                        .wrapping(iced::widget::text::Wrapping::None),
+                        .shaping(text::Shaping::Advanced)
+                        .wrapping(text::Wrapping::None),
                     text(artist)
                         .size(s * 0.05)
                         .font(SF_PRO_DISPLAY_BOLD)
                         .color(palette.primary)
                         .width(Length::Fixed(s * 0.8))
-                        .shaping(iced::widget::text::Shaping::Advanced)
-                        .wrapping(iced::widget::text::Wrapping::None),
+                        .shaping(text::Shaping::Advanced)
+                        .wrapping(text::Wrapping::None),
                 ]
                 .spacing(s * 0.008)
             ]
