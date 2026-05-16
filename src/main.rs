@@ -77,6 +77,12 @@ const SF_PRO_DISPLAY_BLACK: Font = Font {
     ..Font::DEFAULT
 };
 
+const SF_PRO_DISPLAY_MEDIUM: Font = Font {
+    family: Family::Name("SF Pro Display"),
+    weight: Weight::Medium,
+    ..Font::DEFAULT
+};
+
 const FULLSCREEN_EXIT_SVG: &[u8] = include_bytes!("../icons/fullscreen-exit.svg");
 const FULLSCREEN_ENTER_SVG: &[u8] = include_bytes!("../icons/fullscreen-enter.svg");
 
@@ -92,6 +98,7 @@ pub fn main() -> iced::Result {
                 include_bytes!("../fonts/SF-Pro-Display-Black.otf").into(),
                 include_bytes!("../fonts/SF-Pro-Display-Bold.otf").into(),
                 include_bytes!("../fonts/SF-Pro-Compressed.ttf").into(),
+                include_bytes!("../fonts/SF-Pro-Display-Medium.ttf").into(),
             ],
             default_font: SF_PRO_DISPLAY_BOLD,
             ..Settings::default()
@@ -2215,20 +2222,22 @@ impl Application {
                                                     container(
                                                         if let Some(ver) = &self.available_update {
                                                             if self.update_in_progress {
-                                                                container(text(
-                                                                    self.l10n.get("updating"),
-                                                                ))
+                                                                container(
+                                                                    text(self.l10n.get("updating"))
+                                                                        .size(mn * 0.022),
+                                                                )
                                                             } else {
                                                                 container(
-                                                                    button(text(
-                                                                        self.l10n.get_args(
+                                                                    button(
+                                                                        text(self.l10n.get_args(
                                                                             "update-to",
                                                                             &[(
                                                                                 "ver",
                                                                                 ver.as_str(),
                                                                             )],
-                                                                        ),
-                                                                    ))
+                                                                        ))
+                                                                        .size(mn * 0.015),
+                                                                    )
                                                                     .on_press(Message::ApplyUpdate),
                                                                 )
                                                             }
@@ -4494,7 +4503,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueHalf {
                     color: palette.text,
                     align_x: text::Alignment::Center,
                     align_y: alignment::Vertical::Center,
-                    font: SF_PRO_DISPLAY_BLACK,
+                    font: SF_PRO_DISPLAY_MEDIUM,
                     ..canvas::Text::default()
                 });
             }
@@ -5098,7 +5107,7 @@ impl<Message> canvas::Program<Message> for ClockFrameAnalogueRectHalf {
                         color: palette.text,
                         align_x: text::Alignment::Center,
                         align_y: alignment::Vertical::Center,
-                        font: SF_PRO_DISPLAY_BOLD,
+                        font: SF_PRO_DISPLAY_MEDIUM,
                         ..canvas::Text::default()
                     });
                 }
@@ -5541,7 +5550,7 @@ impl WorldClockFull {
         }
 
         let map = svg(svg::Handle::from_memory(include_bytes!(
-            "../icons/world_map.svg"
+            "../icons/world-map.svg"
         )))
         .style(move |_theme: &Theme, _status| svg::Style {
             color: Some(theme.palette().primary),
@@ -6228,6 +6237,32 @@ impl MinimalForecastHalf {
                 let code = w_data.current.as_ref().unwrap().weather_code;
                 if (code == 0 || code == 1) && w_data.current.as_ref().unwrap().is_day == 0 {
                     svg(svg::Handle::from_memory(wmo_code_svg(100)))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: if theme.name() == "red_dark" {
+                                Some(theme.palette().primary)
+                            } else {
+                                None
+                            },
+                        })
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else if (code == 2) && (w_data.current.as_ref().unwrap().is_day == 0) {
+                    svg(svg::Handle::from_memory(wmo_code_svg(101)))
+                        .style(move |_theme: &Theme, _status| svg::Style {
+                            color: if theme.name() == "red_dark" {
+                                Some(theme.palette().primary)
+                            } else {
+                                None
+                            },
+                        })
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else if ((51..=65).contains(&code))
+                    && w_data.current.as_ref().unwrap().is_day == 0
+                {
+                    svg(svg::Handle::from_memory(wmo_code_svg(102)))
                         .style(move |_theme: &Theme, _status| svg::Style {
                             color: if theme.name() == "red_dark" {
                                 Some(theme.palette().primary)
@@ -7682,21 +7717,20 @@ fn wmo_code_description(code: u8, l10n: &L10n) -> String {
 fn wmo_code_svg(code: u8) -> &'static [u8] {
     match code {
         0 | 1 => include_bytes!("../icons/clear.svg"),
-        // 1 => include_bytes!("../icons/mostly_clear.svg"),
-        2 => include_bytes!("../icons/partly_cloudy.svg"),
+        2 => include_bytes!("../icons/partly-cloudy.svg"),
         3 => include_bytes!("../icons/cloudy.svg"),
         45..=48 => include_bytes!("../icons/fog.svg"),
         51..=57 => include_bytes!("../icons/drizzle.svg"),
-        // 56..=57 => include_bytes!("../icons/freezing_drizzle.svg"),
         61..=63 => include_bytes!("../icons/rain.svg"),
-        65 => include_bytes!("../icons/heavy_rain.svg"),
-        // 66..=67 => include_bytes!("../assets/weather/freezing_rain.svg"),
+        65 => include_bytes!("../icons/heavy-rain.svg"),
+        66..=67 => include_bytes!("../icons/freezing-rain.svg"),
         71..=73 => include_bytes!("../icons/snow.svg"),
-        // 75 => include_bytes!("../assets/weather/heavy_snow.svg"),
-        // 77 => include_bytes!("../assets/weather/blizzard.svg"),
-        // 80..=86 => include_bytes!("../assets/weather/wintry_mix.svg"),
+        75 | 77 => include_bytes!("../icons/heavy-snow.svg"),
+        80..=86 => include_bytes!("../icons/freezing-rain.svg"),
         95..=99 => include_bytes!("../icons/thunderstorm.svg"),
         100 => include_bytes!("../icons/clear-night.svg"),
+        101 => include_bytes!("../icons/partly-cloudy-night.svg"),
+        102 => include_bytes!("../icons/drizzle-night.svg"),
         _ => include_bytes!("../icons/warning.svg"),
     }
 }
