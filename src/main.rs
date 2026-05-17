@@ -29,6 +29,7 @@ use iced::{Pixels, mouse};
 use iced_anim::{Animated, Animation, Easing};
 #[cfg(target_os = "macos")]
 use media_remote;
+use open;
 use reqwest;
 use self_update::cargo_crate_version;
 use serde::{Deserialize, Serialize};
@@ -368,6 +369,7 @@ enum Message {
     ApplyUpdate,
     UpdateApplied(Result<Option<String>, String>),
     CarouselChanged(CarouselId, usize),
+    OpenUrl(String),
     None,
 }
 
@@ -406,10 +408,11 @@ impl Application {
             app,
             Task::batch([
                 Task::done(Message::OpenMainWindow),
+                Task::done(Message::LocaleChanged(locale)),
+                Task::done(Message::ApplyTheme(cfg.settings.theme_mode)),
                 Task::done(Message::GetPlayer),
                 Task::done(Message::FetchWeather),
                 Task::done(Message::CheckForUpdate),
-                Task::done(Message::ApplyTheme(cfg.settings.theme_mode)),
                 Task::batch(restore_weather),
             ]),
         )
@@ -1835,6 +1838,10 @@ impl Application {
 
                 Task::none()
             }
+            Message::OpenUrl(url) => {
+                let _ = open::that(url);
+                Task::none()
+            }
             Message::None => Task::none(),
         }
     }
@@ -2499,11 +2506,41 @@ impl Application {
                                                     )
                                                     .align_x(iced::Alignment::End)
                                                 ],
-                                                // text("made with love by gurbanov")
-                                                //     .font(SF_PRO_EXPANDED_BOLD)
-                                                //     .size(mn * 0.015)
-                                                //     .align_x(Alignment::Center)
-                                                //     .width(Length::Fill)
+                                                column![
+                                                    container(row![
+                                                        text(self.l10n.get("made-by"))
+                                                            .font(SF_PRO_EXPANDED_BOLD)
+                                                            .size(mn * 0.015)
+                                                            .color(theme.palette().text),
+                                                        mouse_area(
+                                                            text(" gurbanov")
+                                                                .font(SF_PRO_EXPANDED_BOLD)
+                                                                .size(mn * 0.015)
+                                                                .color(theme.palette().primary)
+                                                        )
+                                                        .on_press(Message::OpenUrl(String::from(
+                                                            "https://github.com/gurbbanov"
+                                                        ))),
+                                                        text(" ♥")
+                                                            .size(mn * 0.015)
+                                                            .color(theme.palette().primary)
+                                                    ])
+                                                    .align_x(Alignment::Center)
+                                                    .width(Length::Fill),
+                                                    container(
+                                                        mouse_area(
+                                                            text("☕")
+                                                                .size(mn * 0.03)
+                                                                .color(theme.palette().primary)
+                                                        )
+                                                        .on_press(Message::OpenUrl(String::from(
+                                                            "https://boosty.to/gurbbanov/donate"
+                                                        )))
+                                                    )
+                                                    .width(Length::Fill)
+                                                    .align_x(Alignment::Center),
+                                                ]
+                                                .spacing(s.height * 0.02)
                                             ]
                                             .width(Length::Fill)
                                             .spacing(s.height * 0.03),
@@ -2521,7 +2558,7 @@ impl Application {
                                 )
                                 .padding(mn * 0.015)
                                 .width(Length::Fixed(mn * 0.7))
-                                .height(Length::Fixed(mn * 0.52))
+                                .height(Length::Fixed(mn * 0.6))
                                 .style(move |_| container::Style {
                                     background: Some(iced::Background::Color(Color::from_rgb8(
                                         23, 23, 23,

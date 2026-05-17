@@ -83,3 +83,4 @@ speed-unit = 速度单位
 version = 版本
 updating = 正在更新...
 update-to = 更新至 { $ver }
+made-by = 用爱制作 by

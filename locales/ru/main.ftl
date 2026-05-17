@@ -83,3 +83,4 @@ speed-unit = единица скорости
 version = версия
 updating = обновление...
 update-to = обновить до { $ver }
+made-by = сделано с любовью by

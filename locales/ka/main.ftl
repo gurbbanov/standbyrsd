@@ -83,3 +83,4 @@ speed-unit = სიჩქარის ერთეული
 version = ვერსია
 updating = განახლება...
 update-to = განახლება { $ver }-მდე
+made-by = სიყვარულით შექმნილია by

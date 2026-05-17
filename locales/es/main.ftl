@@ -83,3 +83,4 @@ speed-unit = unidad de velocidad
 version = versión
 updating = actualizando...
 update-to = actualizar a { $ver }
+made-by = hecho con amor by

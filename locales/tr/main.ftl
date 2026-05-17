@@ -83,3 +83,4 @@ speed-unit = hız birimi
 version = sürüm
 updating = güncelleniyor...
 update-to = { $ver } sürümüne güncelle
+made-by = sevgiyle yapıldı by

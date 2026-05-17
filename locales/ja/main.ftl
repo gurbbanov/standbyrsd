@@ -83,3 +83,4 @@ speed-unit = 速度単位
 version = バージョン
 updating = 更新中...
 update-to = { $ver } に更新
+made-by = 愛を込めて by
