@@ -2,6 +2,7 @@
 
 use chrono::prelude::*;
 use chrono_tz::Tz;
+use dirs;
 use fluent::{FluentArgs, FluentBundle, FluentResource};
 use iana_time_zone::get_timezone;
 use iced::advanced::{
@@ -30,12 +31,13 @@ use iced_anim::{Animated, Animation, Easing};
 use media_remote;
 use reqwest;
 use self_update::cargo_crate_version;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::f32::consts::TAU;
 use std::f64::consts::PI;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use toml;
 use unic_langid::langid;
 use volumecontrol;
 #[cfg(target_os = "windows")]
@@ -43,7 +45,7 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
 };
 
-pub const CURRENT_VERSION: &str = cargo_crate_version!();
+const CURRENT_VERSION: &str = cargo_crate_version!();
 
 const SF_PRO_EXPANDED_BOLD: Font = Font {
     family: Family::Name("SF Pro"),
@@ -86,9 +88,7 @@ const SF_PRO_DISPLAY_MEDIUM: Font = Font {
 const FULLSCREEN_EXIT_SVG: &[u8] = include_bytes!("../icons/fullscreen-exit.svg");
 const FULLSCREEN_ENTER_SVG: &[u8] = include_bytes!("../icons/fullscreen-enter.svg");
 
-static NEXT_WIDGET_ID: AtomicUsize = AtomicUsize::new(0);
-
-pub fn main() -> iced::Result {
+fn main() -> iced::Result {
     iced::daemon(Application::new, Application::update, Application::view)
         .subscription(Application::subscription)
         .settings(Settings {
@@ -179,6 +179,9 @@ struct Application {
     l10n: L10n,
     available_update: Option<String>,
     update_in_progress: bool,
+    carousel_page0_left: usize,
+    carousel_page0_right: usize,
+    carousel_page1: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +223,88 @@ impl Default for AppSettings {
             speed_combo: combo_box::State::new(vec![SpeedUnit::KmH, SpeedUnit::Ms, SpeedUnit::Mph]),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct SavedConfig {
+    #[serde(default)]
+    settings: SavedSettings,
+    #[serde(default)]
+    carousels: SavedCarousels,
+    #[serde(default)]
+    widgets: Vec<SavedWidgetPrefs>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct SavedSettings {
+    theme_mode: ThemeMode,
+    theme_dark_at: String,
+    theme_light_at: String,
+    smooth_tick: bool,
+    locale: Locale,
+    temperature_unit: TemperatureUnit,
+    speed_unit: SpeedUnit,
+}
+
+impl Default for SavedSettings {
+    fn default() -> Self {
+        Self {
+            theme_mode: ThemeMode::default(),
+            theme_dark_at: "21:00".into(),
+            theme_light_at: "08:00".into(),
+            smooth_tick: true,
+            locale: Locale::default(),
+            temperature_unit: TemperatureUnit::default(),
+            speed_unit: SpeedUnit::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct SavedCarousels {
+    page0_left: usize,
+    page0_right: usize,
+    page1: usize,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+struct SavedWidgetPrefs {
+    id: usize,
+    selected_city: Option<GeoResult>,
+}
+
+fn config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("standbyrsd")
+        .join("config.toml")
+}
+
+impl SavedConfig {
+    fn load() -> Self {
+        let path = config_path();
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| toml::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self) {
+        let path = config_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(s) = toml::to_string_pretty(self) {
+            let _ = std::fs::write(path, s);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CarouselId {
+    Page0Left,
+    Page0Right,
+    Page1,
 }
 
 #[derive(Debug, Clone)]
@@ -282,20 +367,140 @@ enum Message {
     UpdateCheckResult(Option<String>),
     ApplyUpdate,
     UpdateApplied(Result<Option<String>, String>),
+    CarouselChanged(CarouselId, usize),
     None,
 }
 
 impl Application {
     fn new() -> (Self, Task<Message>) {
+        let cfg = SavedConfig::load();
+        let mut app = Self::default();
+        app.apply_config(&cfg);
+
+        let locale = app.app_settings.locale.clone();
+        let restore_weather: Vec<Task<Message>> = app
+            .page0_left
+            .iter()
+            .chain(app.page0_right.iter())
+            .chain(app.page1_widgets.iter())
+            .filter_map(|w| match w {
+                AppWidget::Clock(c) => c.selected_city.as_ref().map(|city| (c.id, city.clone())),
+                AppWidget::Weather(w) => w.selected_city.as_ref().map(|city| (w.id, city.clone())),
+                _ => None,
+            })
+            .map(|(id, city)| {
+                let locale = locale.clone();
+                Task::perform(
+                    async move {
+                        match Weather::fetch_for_city(&city, &locale).await {
+                            Ok(w) => WeatherStatus::Ok(w),
+                            Err(e) => WeatherStatus::Error(e.to_string()),
+                        }
+                    },
+                    move |status| Message::WidgetWeatherFetched(id, status),
+                )
+            })
+            .collect();
+
         (
-            Self::default(),
+            app,
             Task::batch([
                 Task::done(Message::OpenMainWindow),
                 Task::done(Message::GetPlayer),
                 Task::done(Message::FetchWeather),
                 Task::done(Message::CheckForUpdate),
+                Task::done(Message::ApplyTheme(cfg.settings.theme_mode)),
+                Task::batch(restore_weather),
             ]),
         )
+    }
+
+    fn build_config(&self) -> SavedConfig {
+        let s = &self.app_settings;
+        SavedConfig {
+            settings: SavedSettings {
+                theme_mode: s.theme_mode.clone(),
+                theme_dark_at: s.theme_dark_at.clone(),
+                theme_light_at: s.theme_light_at.clone(),
+                smooth_tick: s.smooth_tick,
+                locale: s.locale.clone(),
+                temperature_unit: s.temperature_unit.clone(),
+                speed_unit: s.speed_unit.clone(),
+            },
+            carousels: SavedCarousels {
+                page0_left: self.carousel_page0_left,
+                page0_right: self.carousel_page0_right,
+                page1: self.carousel_page1,
+            },
+            widgets: self.collect_widget_prefs(),
+        }
+    }
+
+    fn save_config(&self) {
+        self.build_config().save()
+    }
+
+    fn collect_widget_prefs(&self) -> Vec<SavedWidgetPrefs> {
+        self.page0_left
+            .iter()
+            .chain(self.page0_right.iter())
+            .chain(self.page1_widgets.iter())
+            .filter_map(|w| match w {
+                AppWidget::Clock(c) => Some(SavedWidgetPrefs {
+                    id: c.id.0,
+                    selected_city: c.selected_city.clone(),
+                }),
+                AppWidget::Weather(w) => Some(SavedWidgetPrefs {
+                    id: w.id.0,
+                    selected_city: w.selected_city.clone(),
+                }),
+                AppWidget::Calendar(_) | AppWidget::Media(_) => None,
+            })
+            .collect()
+    }
+
+    fn apply_config(&mut self, cfg: &SavedConfig) {
+        self.app_settings.theme_mode = cfg.settings.theme_mode.clone();
+        self.app_settings.theme_dark_at = cfg.settings.theme_dark_at.clone();
+        self.app_settings.theme_light_at = cfg.settings.theme_light_at.clone();
+        self.app_settings.smooth_tick = cfg.settings.smooth_tick;
+        self.app_settings.locale = cfg.settings.locale.clone();
+        self.app_settings.temperature_unit = cfg.settings.temperature_unit.clone();
+        self.app_settings.speed_unit = cfg.settings.speed_unit.clone();
+
+        self.carousel_page1 = cfg
+            .carousels
+            .page1
+            .min(self.page1_widgets.len().saturating_sub(1));
+        self.carousel_page0_left = cfg
+            .carousels
+            .page0_left
+            .min(self.page0_left.len().saturating_sub(1));
+        self.carousel_page0_right = cfg
+            .carousels
+            .page0_right
+            .min(self.page0_right.len().saturating_sub(1));
+
+        for w in self
+            .page0_left
+            .iter_mut()
+            .chain(self.page0_right.iter_mut())
+            .chain(self.page1_widgets.iter_mut())
+        {
+            match w {
+                AppWidget::Clock(c) => {
+                    if let Some(prefs) = cfg.widgets.iter().find(|p| p.id == c.id.0) {
+                        c.selected_city = prefs.selected_city.clone();
+                    }
+                }
+                AppWidget::Weather(w) => {
+                    if let Some(prefs) = cfg.widgets.iter().find(|p| p.id == w.id.0) {
+                        w.selected_city = prefs.selected_city.clone();
+                    }
+                }
+                AppWidget::Calendar(_) | AppWidget::Media(_) => {}
+            }
+        }
     }
 
     fn try_snap(&mut self) {
@@ -873,10 +1078,12 @@ impl Application {
                     }
                     _ => {}
                 }
+
                 Task::done(Message::GetPlayer)
             }
             Message::ThemeModeChanged(mode) => {
                 self.app_settings.theme_mode = mode.clone();
+                self.save_config();
 
                 match mode {
                     ThemeMode::Classic => Task::done(Message::ApplyTheme(ThemeMode::Classic)),
@@ -993,14 +1200,17 @@ impl Application {
                     }
                     _ => {}
                 }
+
                 Task::none()
             }
             Message::AnimateGradientC1(event) => {
                 self.gradient_c1.update(event);
+
                 Task::none()
             }
             Message::AnimateGradientC2(event) => {
                 self.gradient_c2.update(event);
+
                 Task::none()
             }
             Message::AnimateTheme(event) => {
@@ -1016,6 +1226,7 @@ impl Application {
                 for w in &self.page1_widgets {
                     w.clear_cache();
                 }
+
                 Task::none()
             }
             Message::ToggleFullscreen => {
@@ -1039,19 +1250,23 @@ impl Application {
             Message::FullscreenBtnHover(hovered) => {
                 self.fullscreen_btn_hover
                     .set_target(if hovered { 1.0 } else { 0.0 });
+
                 Task::none()
             }
             Message::SettingsBtnHover(hovered) => {
                 self.settings_btn_hover
                     .set_target(if hovered { 1.0 } else { 0.0 });
+
                 Task::none()
             }
             Message::AnimateFullscreenBtn(e) => {
                 self.fullscreen_btn_hover.update(e);
+
                 Task::none()
             }
             Message::AnimateSettingsBtn(e) => {
                 self.settings_btn_hover.update(e);
+
                 Task::none()
             }
             Message::WidgetHover(id, hovered) => {
@@ -1064,6 +1279,7 @@ impl Application {
                     }
                     _ => {}
                 }
+
                 Task::none()
             }
             Message::WidgetAnimate(id, event) => {
@@ -1072,6 +1288,7 @@ impl Application {
                     Some(AppWidget::Weather(w)) => w.hover.update(event),
                     _ => {}
                 }
+
                 Task::none()
             }
             Message::DragDelta(dx) => {
@@ -1123,16 +1340,19 @@ impl Application {
                         self.try_snap();
                     }
                 }
+
                 Task::none()
             }
             Message::AnimTick(_) => {
                 if self.drag.is_snapping_done() {
                     self.drag = DragState::Idle;
                 }
+
                 Task::none()
             }
             Message::UpdatePageWidth(w) => {
                 self.page_width = w;
+
                 Task::none()
             }
             Message::Play => {
@@ -1329,6 +1549,7 @@ impl Application {
             }
             Message::SeekPreview(ratio) => {
                 self.seek_preview = Some(ratio);
+
                 Task::none()
             }
             Message::SeekCommit(ratio) => {
@@ -1410,6 +1631,7 @@ impl Application {
             }
             Message::VolumePreview(v) => {
                 self.volume_preview = Some(v);
+
                 Task::none()
             }
             Message::VolumeCommit(v) => {
@@ -1429,6 +1651,7 @@ impl Application {
                             .ok();
                     }
                 });
+
                 Task::none()
             }
             Message::VolumeGet => {
@@ -1440,6 +1663,7 @@ impl Application {
                         self.volume = vol as f32 / 100.0;
                     }
                 }
+
                 Task::none()
             }
             Message::OpenSettings => {
@@ -1458,6 +1682,7 @@ impl Application {
                     Some(AppWidget::Weather(w)) => w.preferences_open = true,
                     _ => {}
                 }
+
                 Task::none()
             }
             Message::CloseWidgetPreferences(id) => {
@@ -1466,11 +1691,13 @@ impl Application {
                     Some(AppWidget::Weather(w)) => w.preferences_open = false,
                     _ => {}
                 }
+
                 Task::none()
             }
             Message::LocaleChanged(locale) => {
                 self.app_settings.locale = locale.clone();
                 self.l10n = L10n::new(self.app_settings.locale.as_str());
+                self.save_config();
 
                 Task::done(Message::FetchWeather)
             }
@@ -1501,6 +1728,7 @@ impl Application {
                     Some(AppWidget::Weather(w)) => w.city_results = results,
                     _ => {}
                 }
+
                 Task::none()
             }
             Message::WidgetCitySelected(id, city) => {
@@ -1521,6 +1749,8 @@ impl Application {
                     }
                     _ => {}
                 }
+                self.save_config();
+
                 Task::perform(
                     async move {
                         match Weather::fetch_for_city(&city_clone, &locale).await {
@@ -1543,15 +1773,18 @@ impl Application {
                     }
                     _ => {}
                 }
+
                 Task::none()
             }
             Message::TemperatureUnitChanged(temp_unit) => {
                 self.app_settings.temperature_unit = temp_unit.clone();
+                self.save_config();
 
                 Task::done(Message::FetchWeather)
             }
             Message::SpeedUnitChanged(speed_unit) => {
                 self.app_settings.speed_unit = speed_unit.clone();
+                self.save_config();
 
                 Task::done(Message::FetchWeather)
             }
@@ -1566,6 +1799,7 @@ impl Application {
             ),
             Message::UpdateCheckResult(version) => {
                 self.available_update = version;
+
                 Task::none()
             }
             Message::ApplyUpdate => {
@@ -1588,6 +1822,17 @@ impl Application {
                         .ok();
                     std::process::exit(0);
                 }
+
+                Task::none()
+            }
+            Message::CarouselChanged(carousel_id, index) => {
+                match carousel_id {
+                    CarouselId::Page0Left => self.carousel_page0_left = index,
+                    CarouselId::Page0Right => self.carousel_page0_right = index,
+                    CarouselId::Page1 => self.carousel_page1 = index,
+                }
+                self.save_config();
+
                 Task::none()
             }
             Message::None => Task::none(),
@@ -2253,7 +2498,12 @@ impl Application {
                                                         }
                                                     )
                                                     .align_x(iced::Alignment::End)
-                                                ]
+                                                ],
+                                                // text("made with love by gurbanov")
+                                                //     .font(SF_PRO_EXPANDED_BOLD)
+                                                //     .size(mn * 0.015)
+                                                //     .align_x(Alignment::Center)
+                                                //     .width(Length::Fill)
                                             ]
                                             .width(Length::Fill)
                                             .spacing(s.height * 0.03),
@@ -2271,7 +2521,7 @@ impl Application {
                                 )
                                 .padding(mn * 0.015)
                                 .width(Length::Fixed(mn * 0.7))
-                                .height(Length::Fixed(mn * 0.5))
+                                .height(Length::Fixed(mn * 0.52))
                                 .style(move |_| container::Style {
                                     background: Some(iced::Background::Color(Color::from_rgb8(
                                         23, 23, 23,
@@ -2372,8 +2622,13 @@ impl Application {
             })
             .collect();
 
-        let left = vertical_carousel(left_items, sw, sh);
-        let right = vertical_carousel(right_items, sw, sh);
+        let left = vertical_carousel(left_items, sw, sh, self.carousel_page0_left, |index| {
+            Message::CarouselChanged(CarouselId::Page0Left, index)
+        });
+
+        let right = vertical_carousel(right_items, sw, sh, self.carousel_page0_right, |index| {
+            Message::CarouselChanged(CarouselId::Page0Right, index)
+        });
 
         let primary = self.theme.value().palette().primary;
 
@@ -2483,7 +2738,13 @@ impl Application {
             })
             .collect();
 
-        vertical_carousel(items, size.width, size.height)
+        vertical_carousel(
+            items,
+            size.width,
+            size.height,
+            self.carousel_page1,
+            |index| Message::CarouselChanged(CarouselId::Page1, index),
+        )
     }
 
     fn find_widget_mut(&mut self, id: WidgetId) -> Option<&mut AppWidget> {
@@ -2504,58 +2765,75 @@ impl Default for Application {
             time: chrono::Utc::now(),
             weather: WeatherStatus::Loading,
             page0_left: vec![
-                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueHalf(
-                    AnalogueClockHalf::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueCityHalf(
-                    AnalogueClockCityHalf::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalHalf(
-                    MinimalClockHalf::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::MinimalCityHalf(
-                    MinimalClockCityHalf::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueRectHalf(
-                    AnalogueRectClockHalf::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueRectCityHalf(
-                    AnalogueRectClockCityHalf::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::DigitalHalf(
-                    DigitalClockHalf::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::DigitalCityHalf(
-                    DigitalClockCityHalf::default(),
-                ))),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L0,
+                    ClockStyle::AnalogueHalf(AnalogueClockHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L1,
+                    ClockStyle::AnalogueCityHalf(AnalogueClockCityHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L2,
+                    ClockStyle::MinimalHalf(MinimalClockHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L3,
+                    ClockStyle::MinimalCityHalf(MinimalClockCityHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L4,
+                    ClockStyle::AnalogueRectHalf(AnalogueRectClockHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L5,
+                    ClockStyle::AnalogueRectCityHalf(AnalogueRectClockCityHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L6,
+                    ClockStyle::DigitalHalf(DigitalClockHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L7,
+                    ClockStyle::DigitalCityHalf(DigitalClockCityHalf::default()),
+                )),
             ],
             page0_right: vec![
                 AppWidget::Media(MediaWidget::default()),
-                AppWidget::Calendar(CalendarWidget::new(CalendarStyle::MonthHalf(
-                    MonthCalendarHalf::default(),
-                ))),
-                AppWidget::Calendar(CalendarWidget::new(CalendarStyle::DateHalf(
-                    DateCalendarHalf::default(),
-                ))),
-                AppWidget::Weather(WeatherWidget::default()),
-                AppWidget::Weather(WeatherWidget::new(WeatherStyle::DetailedHalf(
-                    DetailedForecastHalf::default(),
-                ))),
-                AppWidget::Weather(WeatherWidget::new(WeatherStyle::DailyHalf(
-                    DailyForecastHalf::default(),
-                ))),
+                AppWidget::Calendar(CalendarWidget::new_with_id(
+                    WID_R1,
+                    CalendarStyle::MonthHalf(MonthCalendarHalf::default()),
+                )),
+                AppWidget::Calendar(CalendarWidget::new_with_id(
+                    WID_R2,
+                    CalendarStyle::DateHalf(DateCalendarHalf::default()),
+                )),
+                AppWidget::Weather(WeatherWidget::new_with_id(
+                    WID_R3,
+                    WeatherStyle::MinimalHalf(MinimalForecastHalf::default()),
+                )),
+                AppWidget::Weather(WeatherWidget::new_with_id(
+                    WID_R4,
+                    WeatherStyle::DetailedHalf(DetailedForecastHalf::default()),
+                )),
+                AppWidget::Weather(WeatherWidget::new_with_id(
+                    WID_R5,
+                    WeatherStyle::DailyHalf(DailyForecastHalf::default()),
+                )),
             ],
             page1_widgets: vec![
                 AppWidget::Media(MediaWidget {
-                    id: WidgetId::new(),
+                    id: WID_P0,
                     style: MediaStyle::MediaFull(MediaWidgetFull::default()),
                 }),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::WorldFull(
-                    WorldClockFull::default(),
-                ))),
-                AppWidget::Clock(ClockWidget::new(ClockStyle::AnalogueRectFull(
-                    AnalogueRectClockFull::default(),
-                ))),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_P1,
+                    ClockStyle::WorldFull(WorldClockFull::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_P2,
+                    ClockStyle::AnalogueRectFull(AnalogueRectClockFull::default()),
+                )),
             ],
             gradient_c1: Animated::new(
                 Color::BLACK,
@@ -2609,12 +2887,16 @@ impl Default for Application {
             l10n: l10n,
             available_update: None,
             update_in_progress: false,
+            carousel_page0_left: 0,
+            carousel_page0_right: 0,
+            carousel_page1: 0,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Deserialize, Serialize)]
 enum ThemeMode {
+    #[default]
     Classic,
     RedDark,
     AutoSunrise,
@@ -2757,7 +3039,9 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer>
     ) {
         let bounds = layout.bounds();
 
-        shell.publish(Message::UpdatePageWidth(bounds.width));
+        if bounds.width > 0.0 {
+            shell.publish(Message::UpdatePageWidth(bounds.width));
+        }
 
         if let iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) = event {
             if cursor.is_over(bounds) {
@@ -2897,17 +3181,23 @@ struct VerticalCarousel<'a> {
     items: Vec<Element<'a, Message>>,
     slot_width: f32,
     slot_height: f32,
+    initial_current: usize,
+    on_change: Box<dyn Fn(usize) -> Message + 'a>,
 }
 
 fn vertical_carousel<'a>(
     items: Vec<Element<'a, Message>>,
     slot_width: f32,
     slot_height: f32,
+    initial_current: usize,
+    on_change: impl Fn(usize) -> Message + 'a,
 ) -> Element<'a, Message> {
     VerticalCarousel {
         items,
         slot_width,
         slot_height,
+        initial_current,
+        on_change: Box::new(on_change),
     }
     .into()
 }
@@ -2931,7 +3221,10 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
     }
 
     fn state(&self) -> widget::tree::State {
-        widget::tree::State::new(CarouselState::default())
+        widget::tree::State::new(CarouselState {
+            current: self.initial_current,
+            ..Default::default()
+        })
     }
 
     fn children(&self) -> Vec<widget::Tree> {
@@ -3043,7 +3336,11 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
             if state.snap.is_none() {
                 if let Some(last) = state.last_event {
                     if last.elapsed().as_millis() >= IDLE_MS as u128 {
+                        let prev = state.current;
                         state.try_snap(count, sh);
+                        if state.current != prev {
+                            shell.publish((self.on_change)(state.current));
+                        }
                     }
                 }
             }
@@ -3062,7 +3359,11 @@ impl<'a> iced::advanced::Widget<Message, Theme, Renderer> for VerticalCarousel<'
                         state.last_event = Some(Instant::now());
 
                         if dy.abs() < 1.5 {
+                            let prev = state.current;
                             state.try_snap(count, sh);
+                            if state.current != prev {
+                                shell.publish((self.on_change)(state.current));
+                            }
                         }
 
                         return;
@@ -3138,7 +3439,7 @@ enum AppWidget {
 }
 
 impl AppWidget {
-    pub fn view<'a>(
+    fn view<'a>(
         &'a self,
         time: &'a DateTime<Utc>,
         weather: &'a WeatherStatus,
@@ -3173,7 +3474,7 @@ impl AppWidget {
         }
     }
 
-    pub fn clear_cache(&self) {
+    fn clear_cache(&self) {
         match self {
             AppWidget::Clock(w) => w.clear_cache(),
             AppWidget::Calendar(w) => w.clear_cache(),
@@ -3182,7 +3483,7 @@ impl AppWidget {
         }
     }
 
-    pub fn id(&self) -> WidgetId {
+    fn id(&self) -> WidgetId {
         match self {
             AppWidget::Calendar(w) => w.id,
             AppWidget::Clock(w) => w.id,
@@ -3202,9 +3503,9 @@ struct CalendarWidget {
 }
 
 impl CalendarWidget {
-    fn new(style: CalendarStyle) -> Self {
+    fn new_with_id(id: WidgetId, style: CalendarStyle) -> Self {
         Self {
-            id: WidgetId::new(),
+            id: id,
             style: style,
         }
     }
@@ -3480,7 +3781,7 @@ struct ClockWidget {
 impl Default for ClockWidget {
     fn default() -> Self {
         Self {
-            id: WidgetId::new(),
+            id: WID_L0,
             style: ClockStyle::AnalogueHalf(AnalogueClockHalf::default()),
             hover: Animated::new(
                 0.0f32,
@@ -3496,9 +3797,9 @@ impl Default for ClockWidget {
 }
 
 impl ClockWidget {
-    fn new(style: ClockStyle) -> Self {
+    fn new_with_id(id: WidgetId, style: ClockStyle) -> Self {
         Self {
-            id: WidgetId::new(),
+            id: id,
             style: style,
             hover: Animated::new(
                 0.0f32,
@@ -4450,7 +4751,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
 }
 
 #[derive(Default)]
-pub struct HandsAnimState {
+struct HandsAnimState {
     hour: std::cell::Cell<f32>,
     minute: std::cell::Cell<f32>,
     second: std::cell::Cell<f32>,
@@ -5767,7 +6068,7 @@ struct Weather {
     daily: Option<DailyForecast>,
 }
 
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 struct GeoResult {
     name: String,
     latitude: f64,
@@ -5775,7 +6076,7 @@ struct GeoResult {
     timezone: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 struct GeoResponse {
     results: Option<Vec<GeoResult>>,
 }
@@ -5886,7 +6187,7 @@ struct WeatherWidget {
 impl Default for WeatherWidget {
     fn default() -> Self {
         Self {
-            id: WidgetId::new(),
+            id: WID_R3,
             style: WeatherStyle::MinimalHalf(MinimalForecastHalf::default()),
             hover: Animated::new(
                 0.0f32,
@@ -5902,9 +6203,9 @@ impl Default for WeatherWidget {
 }
 
 impl WeatherWidget {
-    fn new(style: WeatherStyle) -> Self {
+    fn new_with_id(id: WidgetId, style: WeatherStyle) -> Self {
         Self {
-            id: WidgetId::new(),
+            id: id,
             style: style,
             hover: Animated::new(
                 0.0f32,
@@ -7064,7 +7365,7 @@ struct MediaWidget {
 impl Default for MediaWidget {
     fn default() -> Self {
         Self {
-            id: WidgetId::new(),
+            id: WID_R0,
             style: MediaStyle::MediaHalf(MediaWidgetHalf::default()),
         }
     }
@@ -7293,6 +7594,7 @@ impl MediaWidgetHalf {
         };
 
         let fmt_time = |secs: i64| format!("{:02}:{:02}", secs / 60, secs % 60);
+        let fmt_remaining = |secs: i64| format!("-{:02}:{:02}", secs / 60, secs % 60);
 
         let timecode = row![
             text(fmt_time(position))
@@ -7300,7 +7602,7 @@ impl MediaWidgetHalf {
                 .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
             iced::widget::Space::new().width(Length::Fill),
-            text(fmt_time(duration))
+            text(fmt_remaining(duration - position))
                 .size(s * 0.03)
                 .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
@@ -7481,6 +7783,7 @@ impl MediaWidgetFull {
         };
 
         let fmt_time = |secs: i64| format!("{:02}:{:02}", secs / 60, secs % 60);
+        let fmt_remaining = |secs: i64| format!("-{:02}:{:02}", secs / 60, secs % 60);
 
         let timecode = row![
             text(fmt_time(position))
@@ -7488,7 +7791,7 @@ impl MediaWidgetFull {
                 .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
             iced::widget::Space::new().width(Length::Fill),
-            text(fmt_time(duration))
+            text(fmt_remaining(duration - position))
                 .size(s * 0.03)
                 .color(palette.text)
                 .font(SF_PRO_DISPLAY_BOLD),
@@ -7671,7 +7974,7 @@ struct MediaMetadata {
     position_origin: DateTime<Utc>,
 }
 
-pub fn weekday_to_number(weekday: &Weekday) -> usize {
+fn weekday_to_number(weekday: &Weekday) -> usize {
     match weekday {
         Weekday::Mon => 1,
         Weekday::Tue => 2,
@@ -8056,7 +8359,7 @@ fn calc_ratio(orientation: &Orientation, pos: Point, bounds: Rectangle) -> f32 {
     }
 }
 
-pub fn subsolar_point() -> (f64, f64) {
+fn subsolar_point() -> (f64, f64) {
     let utc = Utc::now();
     let day = utc.ordinal() as f64;
 
@@ -8077,7 +8380,7 @@ pub fn subsolar_point() -> (f64, f64) {
     (declination, subsolar_lon)
 }
 
-pub fn terminator_points(sub_lat_deg: f64, sub_lon_deg: f64, n: usize) -> Vec<(f64, f64)> {
+fn terminator_points(sub_lat_deg: f64, sub_lon_deg: f64, n: usize) -> Vec<(f64, f64)> {
     let dec = sub_lat_deg.to_radians();
     let ra = sub_lon_deg.to_radians();
 
@@ -8109,7 +8412,7 @@ pub fn terminator_points(sub_lat_deg: f64, sub_lon_deg: f64, n: usize) -> Vec<(f
         })
         .collect()
 }
-pub fn draw_night_overlay(
+fn draw_night_overlay(
     frame: &mut Frame,
     bounds: Rectangle,
     theme: &Theme,
@@ -9013,8 +9316,9 @@ static MAP_DOTS: &[(f64, f64)] = &[
     (-80.81433224755699, -69.45013979496738),
 ];
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug, Deserialize, Serialize)]
 enum Locale {
+    #[default]
     En,
     Ru,
     Az,
@@ -9132,15 +9436,29 @@ impl L10n {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WidgetId(usize);
+struct WidgetId(usize);
 
-impl WidgetId {
-    fn new() -> Self {
-        Self(NEXT_WIDGET_ID.fetch_add(1, Ordering::Relaxed))
-    }
-}
+const WID_L0: WidgetId = WidgetId(0);
+const WID_L1: WidgetId = WidgetId(1);
+const WID_L2: WidgetId = WidgetId(2);
+const WID_L3: WidgetId = WidgetId(3);
+const WID_L4: WidgetId = WidgetId(4);
+const WID_L5: WidgetId = WidgetId(5);
+const WID_L6: WidgetId = WidgetId(6);
+const WID_L7: WidgetId = WidgetId(7);
 
-#[derive(Default, Debug, Clone)]
+const WID_R0: WidgetId = WidgetId(8);
+const WID_R1: WidgetId = WidgetId(9);
+const WID_R2: WidgetId = WidgetId(10);
+const WID_R3: WidgetId = WidgetId(11);
+const WID_R4: WidgetId = WidgetId(12);
+const WID_R5: WidgetId = WidgetId(13);
+
+const WID_P0: WidgetId = WidgetId(14);
+const WID_P1: WidgetId = WidgetId(15);
+const WID_P2: WidgetId = WidgetId(16);
+
+#[derive(Default, Debug, Clone, Deserialize, Serialize)]
 enum TemperatureUnit {
     #[default]
     Celsius,
@@ -9156,7 +9474,7 @@ impl std::fmt::Display for TemperatureUnit {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Deserialize, Serialize)]
 enum SpeedUnit {
     #[default]
     KmH,
@@ -9181,7 +9499,7 @@ fn lerp_angle(current: f32, target: f32, t: f32) -> f32 {
     current + diff * t
 }
 
-pub fn check_for_update() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+fn check_for_update() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
     let releases = self_update::backends::github::ReleaseList::configure()
         .repo_owner("gurbbanov")
         .repo_name("standbyrsd")
@@ -9202,7 +9520,7 @@ pub fn check_for_update() -> Result<Option<String>, Box<dyn std::error::Error + 
     Ok(None)
 }
 
-pub fn apply_update() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+fn apply_update() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
     let releases = self_update::backends::github::ReleaseList::configure()
         .repo_owner("gurbbanov")
         .repo_name("standbyrsd")
@@ -9259,7 +9577,7 @@ pub fn apply_update() -> Result<Option<String>, Box<dyn std::error::Error + Send
 }
 
 #[cfg(target_os = "windows")]
-pub fn apply_update_windows() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+fn apply_update_windows() -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
     let releases = self_update::backends::github::ReleaseList::configure()
         .repo_owner("gurbbanov")
         .repo_name("standbyrsd")
