@@ -8,8 +8,8 @@ use crate::slide_pages::{DragState, slide_pages_func};
 use crate::update::{apply_update, check_for_update};
 use crate::weather::{GeoResponse, Weather, WeatherStatus};
 use crate::widgets::{
-    AppWidget, ClearCache, WID_L0, WID_L1, WID_L2, WID_L3, WID_L4, WID_L5, WID_L6, WID_L7, WID_P0,
-    WID_P1, WID_P2, WID_R1, WID_R2, WID_R3, WID_R4, WID_R5, WidgetId,
+    AppWidget, ClearCache, WID_L0, WID_L1, WID_L2, WID_L3, WID_L4, WID_L5, WID_L6, WID_L7, WID_L8,
+    WID_P0, WID_P1, WID_P2, WID_R1, WID_R2, WID_R3, WID_R4, WID_R5, WidgetId,
 };
 use crate::widgets::{calendar::*, clock::*, media::*, weather::*};
 use crate::{
@@ -152,10 +152,16 @@ impl Application {
                 AppWidget::Clock(c) => Some(SavedWidgetPrefs {
                     id: c.id.0,
                     selected_city: c.selected_city.clone(),
+                    world_cities: if let ClockStyle::WorldHalf(world) = &c.style {
+                        Some(world.tzs.clone())
+                    } else {
+                        None
+                    },
                 }),
                 AppWidget::Weather(w) => Some(SavedWidgetPrefs {
                     id: w.id.0,
                     selected_city: w.selected_city.clone(),
+                    world_cities: None,
                 }),
                 AppWidget::Calendar(_) | AppWidget::Media(_) => None,
             })
@@ -194,6 +200,11 @@ impl Application {
                 AppWidget::Clock(c) => {
                     if let Some(prefs) = cfg.widgets.iter().find(|p| p.id == c.id.0) {
                         c.selected_city = prefs.selected_city.clone();
+                        if let (Some(cities), ClockStyle::WorldHalf(world)) =
+                            (&prefs.world_cities, &mut c.style)
+                        {
+                            world.tzs = cities.clone();
+                        }
                     }
                 }
                 AppWidget::Weather(w) => {
@@ -786,7 +797,6 @@ impl Application {
             }
             Message::ThemeModeChanged(mode) => {
                 self.app_settings.theme_mode = mode.clone();
-                self.save_config();
 
                 match mode {
                     ThemeMode::Classic => Task::done(Message::ApplyTheme(ThemeMode::Classic)),
@@ -1376,6 +1386,7 @@ impl Application {
             }
             Message::CloseSettings => {
                 self.settings_open = false;
+                self.save_config();
 
                 Task::none()
             }
@@ -1394,13 +1405,13 @@ impl Application {
                     Some(AppWidget::Weather(w)) => w.preferences_open = false,
                     _ => {}
                 }
+                self.save_config();
 
                 Task::none()
             }
             Message::LocaleChanged(locale) => {
                 self.app_settings.locale = locale.clone();
                 self.l10n = L10n::new(self.app_settings.locale.as_str());
-                self.save_config();
 
                 Task::done(Message::FetchWeather)
             }
@@ -1452,7 +1463,6 @@ impl Application {
                     }
                     _ => {}
                 }
-                self.save_config();
 
                 Task::perform(
                     async move {
@@ -1479,15 +1489,53 @@ impl Application {
 
                 Task::none()
             }
+            Message::WorldCityInputChanged(id, index, input) => {
+                match self.find_widget_mut(id) {
+                    Some(AppWidget::Clock(w)) => w.world_city_inputs[index] = input.clone(),
+                    _ => {}
+                }
+                let locale = self.app_settings.locale.clone();
+                Task::perform(
+                    async move {
+                        reqwest::get(format!(
+                            "https://geocoding-api.open-meteo.com/v1/search?name={}&language={}&count=5",
+                            input, locale.as_str()
+                        ))
+                        .await?
+                        .json::<GeoResponse>()
+                        .await
+                        .map(|r| r.results.unwrap_or_default())
+                    },
+                    move |res| Message::WorldCitySearchResults(id, index, res.unwrap_or_default()),
+                )
+            }
+            Message::WorldCitySearchResults(id, index, results) => {
+                match self.find_widget_mut(id) {
+                    Some(AppWidget::Clock(w)) => w.world_city_results[index] = results,
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::WorldCitySelected(id, index, city) => {
+                match self.find_widget_mut(id) {
+                    Some(AppWidget::Clock(w)) => {
+                        if let ClockStyle::WorldHalf(world) = &mut w.style {
+                            world.tzs[index] = Some(city.clone());
+                        }
+                        w.world_city_results[index] = vec![];
+                        w.world_city_inputs[index] = city.name.clone();
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
             Message::TemperatureUnitChanged(temp_unit) => {
                 self.app_settings.temperature_unit = temp_unit.clone();
-                self.save_config();
 
                 Task::done(Message::FetchWeather)
             }
             Message::SpeedUnitChanged(speed_unit) => {
                 self.app_settings.speed_unit = speed_unit.clone();
-                self.save_config();
 
                 Task::done(Message::FetchWeather)
             }
@@ -2533,6 +2581,10 @@ impl Default for Application {
                 AppWidget::Clock(ClockWidget::new_with_id(
                     WID_L7,
                     ClockStyle::DigitalCityHalf(DigitalClockCityHalf::default()),
+                )),
+                AppWidget::Clock(ClockWidget::new_with_id(
+                    WID_L8,
+                    ClockStyle::WorldHalf(WorldClockHalf::default()),
                 )),
             ],
             page0_right: vec![

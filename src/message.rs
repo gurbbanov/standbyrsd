@@ -8,6 +8,7 @@ use chrono::Utc;
 use iced::window::Id;
 use iced::{Color, Theme};
 use std::time::Instant;
+#[cfg(target_os = "windows")]
 use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
 
 #[derive(Debug, Clone)]
@@ -64,6 +65,9 @@ pub enum Message {
     WidgetCitySearchResults(WidgetId, Vec<GeoResult>),
     WidgetCitySelected(WidgetId, GeoResult),
     WidgetWeatherFetched(WidgetId, WeatherStatus),
+    WorldCityInputChanged(WidgetId, usize, String),
+    WorldCitySearchResults(WidgetId, usize, Vec<GeoResult>),
+    WorldCitySelected(WidgetId, usize, GeoResult),
     TemperatureUnitChanged(TemperatureUnit),
     SpeedUnitChanged(SpeedUnit),
     CheckForUpdate,

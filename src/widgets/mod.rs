@@ -23,6 +23,7 @@ pub const WID_L4: WidgetId = WidgetId(4);
 pub const WID_L5: WidgetId = WidgetId(5);
 pub const WID_L6: WidgetId = WidgetId(6);
 pub const WID_L7: WidgetId = WidgetId(7);
+pub const WID_L8: WidgetId = WidgetId(8);
 
 pub const WID_R0: WidgetId = WidgetId(8);
 pub const WID_R1: WidgetId = WidgetId(9);

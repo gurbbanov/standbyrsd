@@ -9,9 +9,10 @@ use crate::{
 use chrono::*;
 use chrono_tz::Tz;
 use iced::border::Radius;
+use iced::theme::Base;
 use iced::widget::canvas::{Cache, Frame, LineCap, Path, Stroke, stroke};
 use iced::widget::{
-    button, canvas, column, container, mouse_area, row, stack, svg, text, text_input,
+    button, canvas, column, container, mouse_area, responsive, row, stack, svg, text, text_input,
 };
 use iced::{
     Alignment, Color, Degrees, Element, Length, Padding, Pixels, Point, Radians, Rectangle,
@@ -32,6 +33,8 @@ pub struct ClockWidget {
     pub city_input: String,
     pub city_results: Vec<GeoResult>,
     pub selected_city: Option<GeoResult>,
+    pub world_city_inputs: [String; 4],
+    pub world_city_results: [Vec<GeoResult>; 4],
 }
 
 impl Default for ClockWidget {
@@ -48,6 +51,8 @@ impl Default for ClockWidget {
             city_input: String::new(),
             city_results: vec![],
             selected_city: None,
+            world_city_inputs: Default::default(),
+            world_city_results: Default::default(),
         }
     }
 }
@@ -66,6 +71,8 @@ impl ClockWidget {
             city_input: String::new(),
             city_results: vec![],
             selected_city: None,
+            world_city_inputs: Default::default(),
+            world_city_results: Default::default(),
         }
     }
 
@@ -272,8 +279,228 @@ impl ClockWidget {
                                         .spacing(size.height * 0.03),
                                     )
                                     .padding(mn * 0.015)
+                                    //window size
                                     .width(Length::Fixed(mn * 0.7))
                                     .height(Length::Fixed(mn * 0.4))
+                                    .style(move |_| {
+                                        container::Style {
+                                            background: Some(iced::Background::Color(
+                                                Color::from_rgb8(23, 23, 23),
+                                            )),
+                                            border: iced::Border {
+                                                radius: (mn * 0.015).into(),
+                                                ..Default::default()
+                                            },
+                                            ..Default::default()
+                                        }
+                                    }),
+                                )
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .align_x(iced::Alignment::Center)
+                                .align_y(iced::Alignment::Center),
+                            )
+                            .on_press(Message::None),
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(iced::Alignment::Center)
+                        .align_y(iced::Alignment::Center)
+                        .style(|_| container::Style {
+                            background: Some(iced::Background::Color(Color::from_rgba(
+                                0.0, 0.0, 0.0, 0.5,
+                            ))),
+                            ..Default::default()
+                        })
+                    } else {
+                        container(text(""))
+                            .width(Length::Fixed(0.0))
+                            .height(Length::Fixed(0.0))
+                            .into()
+                    })
+                    .on_press(Message::None)
+                    .on_scroll(|_| Message::None)
+                ]
+                .into()
+            }
+            ClockStyle::WorldHalf(_) => {
+                let id = self.id;
+
+                let sh = size.height;
+                let sw = size.width;
+
+                let primary = theme.palette().primary;
+
+                let t_btn = *self.hover.value();
+                let btn_color = Color {
+                    r: primary.r * t_btn + 0.0 * (1.0 - t_btn),
+                    g: primary.g * t_btn + 0.0 * (1.0 - t_btn),
+                    b: primary.b * t_btn + 0.0 * (1.0 - t_btn),
+                    a: 1.0,
+                };
+
+                let city_label = l10n.get("city").clone();
+                let search_placeholder = l10n.get("search-city").clone();
+                let preferences_label = l10n.get("preferences").clone();
+
+                let mn = size.height.min(size.width);
+
+                let make_city_row = |i: usize| {
+                    let label = format!("{} {}", city_label, i + 1);
+                    row![
+                        container(text(label).size(mn * 0.022).color(theme.palette().text))
+                            .width(Length::Fill)
+                            .align_x(iced::Alignment::Start),
+                        container(column![
+                            text_input(search_placeholder.as_str(), &self.world_city_inputs[i])
+                                .on_input(move |s| Message::WorldCityInputChanged(id, i, s))
+                                .width(Length::Fixed(mn * 0.2))
+                                .style(move |_t, _status| text_input::Style {
+                                    value: theme.palette().text,
+                                    placeholder: theme.palette().text,
+                                    selection: theme.palette().primary,
+                                    background: iced::Background::Color(Color::TRANSPARENT),
+                                    border: iced::Border {
+                                        color: theme.palette().primary,
+                                        width: 1.0,
+                                        radius: 4.0.into(),
+                                    },
+                                    icon: theme.palette().text,
+                                })
+                                .size(mn * 0.02),
+                            container(column(
+                                self.world_city_results[i]
+                                    .iter()
+                                    .map(|city| {
+                                        let name = city.name.clone();
+                                        let city = city.clone();
+                                        button(text(name).size(mn * 0.02))
+                                            .style(move |_t, _status| button::Style {
+                                                background: None,
+                                                text_color: theme.palette().text,
+                                                ..Default::default()
+                                            })
+                                            .on_press(Message::WorldCitySelected(id, i, city))
+                                            .into()
+                                    })
+                                    .collect::<Vec<_>>()
+                            ))
+                            .style(move |_t| container::Style {
+                                background: Some(iced::Background::Color(Color::BLACK)),
+                                border: iced::Border {
+                                    color: theme.palette().primary,
+                                    width: 1.0,
+                                    radius: 4.0.into(),
+                                },
+                                ..Default::default()
+                            })
+                        ])
+                        .align_x(iced::Alignment::End),
+                    ]
+                    .width(Length::Fill)
+                };
+
+                stack![
+                    self.style.view(
+                        time,
+                        &self.selected_city,
+                        weather,
+                        &self.custom_weather,
+                        theme,
+                        size,
+                        smooth_tick,
+                        l10n
+                    ),
+                    Animation::new(
+                        &self.hover,
+                        container(
+                            mouse_area(
+                                button(
+                                    svg(svg::Handle::from_memory(include_bytes!(
+                                        "../../icons/brush.svg"
+                                    )))
+                                    .style(move |_theme: &Theme, _status| svg::Style {
+                                        color: Some(btn_color),
+                                        ..Default::default()
+                                    })
+                                    .width(Length::Fixed(sw.min(sh) * 0.1 * t_btn.max(0.3)))
+                                    .height(Length::Fixed(sw.min(sh) * 0.1 * t_btn.max(0.3))),
+                                )
+                                .style(|_, _| button::Style {
+                                    background: None,
+                                    ..Default::default()
+                                })
+                                .on_press(Message::OpenWidgetPreferences(id))
+                            )
+                            .on_enter(Message::WidgetHover(id, true))
+                            .on_exit(Message::WidgetHover(id, false)),
+                        )
+                        .padding(Padding::new(sw.min(sh) * 0.03))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(Alignment::Start)
+                        .align_y(Alignment::End)
+                    )
+                    .on_update(move |e| Message::WidgetAnimate(id, e)),
+                    mouse_area(if self.preferences_open {
+                        container(
+                            mouse_area(
+                                container(
+                                    container(
+                                        column![
+                                            row![
+                                                container(
+                                                    text(preferences_label)
+                                                        .size(mn * 0.05)
+                                                        .color(theme.palette().text)
+                                                )
+                                                .width(Length::Fill)
+                                                .align_x(iced::Alignment::Start),
+                                                container(
+                                                    button(
+                                                        container("")
+                                                            .width(Length::Fixed(mn * 0.02))
+                                                            .height(Length::Fixed(mn * 0.02))
+                                                    )
+                                                    .on_press(Message::CloseWidgetPreferences(id))
+                                                    .width(Length::Fixed(mn * 0.02))
+                                                    .height(Length::Fixed(mn * 0.02))
+                                                    .padding(0)
+                                                    .style(|_, status| {
+                                                        let color = match status {
+                                                            button::Status::Hovered => {
+                                                                Color::from_rgb8(255, 80, 80)
+                                                            }
+                                                            _ => Color::from_rgb8(220, 50, 50),
+                                                        };
+                                                        button::Style {
+                                                            background: Some(
+                                                                iced::Background::Color(color),
+                                                            ),
+                                                            border: iced::Border {
+                                                                radius: 10.0.into(),
+                                                                ..Default::default()
+                                                            },
+                                                            ..Default::default()
+                                                        }
+                                                    })
+                                                )
+                                                .width(Length::Shrink)
+                                                .align_x(iced::Alignment::End),
+                                            ]
+                                            .width(Length::Fill),
+                                            make_city_row(0),
+                                            make_city_row(1),
+                                            make_city_row(2),
+                                            make_city_row(3),
+                                        ]
+                                        .width(Length::Fill)
+                                        .spacing(size.height * 0.03),
+                                    )
+                                    .padding(mn * 0.015)
+                                    //window size
+                                    .width(Length::Fixed(mn * 0.7))
+                                    .height(Length::Fixed(mn * 0.6))
                                     .style(move |_| {
                                         container::Style {
                                             background: Some(iced::Background::Color(
@@ -345,6 +572,7 @@ pub enum ClockStyle {
     AnalogueRectHalf(AnalogueRectClockHalf),
     AnalogueRectCityHalf(AnalogueRectClockCityHalf),
     AnalogueRectFull(AnalogueRectClockFull),
+    WorldHalf(WorldClockHalf),
     WorldFull(WorldClockFull),
 }
 
@@ -380,6 +608,7 @@ impl ClockStyle {
                 clock.view(time, tz, effective_weather, smooth_tick, size, theme)
             }
             ClockStyle::AnalogueRectFull(clock) => clock.view(time, tz, smooth_tick, l10n),
+            ClockStyle::WorldHalf(clock) => clock.view(time, smooth_tick, theme),
             ClockStyle::WorldFull(clock) => clock.view(time, weather, theme, size, l10n),
         }
     }
@@ -690,7 +919,7 @@ impl AnalogueClockHalf {
     ) -> Element<'a, Message> {
         stack![
             self.clock_frame.view(),
-            self.hands.view(time, tz, smooth_tick)
+            self.hands.view(time, tz, smooth_tick, false)
         ]
         .into()
     }
@@ -713,17 +942,26 @@ impl Hands {
         time: &'a DateTime<Utc>,
         tz: &'a Option<GeoResult>,
         smooth_tick: bool,
+        adaptive: bool,
     ) -> Element<'a, Message> {
         self.cache.clear();
 
-        canvas((self, time, tz, smooth_tick))
+        canvas((self, time, tz, smooth_tick, adaptive))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
 }
 
-impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<GeoResult>, bool) {
+impl<'a> canvas::Program<Message>
+    for (
+        &'a Hands,
+        &'a DateTime<Utc>,
+        &'a Option<GeoResult>,
+        bool,
+        bool,
+    )
+{
     type State = HandsAnimState;
 
     fn draw(
@@ -735,7 +973,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let palette = theme.palette();
-        let (widget, now, selected_city, smooth_tick) = self;
+        let (widget, now, selected_city, smooth_tick, adaptive) = self;
 
         let now = if let Some(city) = selected_city {
             if let Ok(tz) = city.timezone.parse::<Tz>() {
@@ -747,9 +985,22 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
             now.with_timezone(&Local).fixed_offset()
         };
 
+        let black = if *adaptive == true {
+            let hour = now.hour();
+            hour >= 7 && hour < 20
+        } else {
+            false
+        };
+
         let dynamic_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
             let center = frame.center();
             let radius = frame.width().min(frame.height()) / 2.3;
+            let neck_color = if theme.name() == "red_dark" || !black {
+                palette.text
+            } else {
+                palette.background
+            };
+
             let seconds = if *smooth_tick {
                 now.second() as f32 + now.nanosecond() as f32 / 1_000_000_000.0
             } else {
@@ -800,18 +1051,18 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
             frame.with_save(|frame| {
                 frame.rotate(hour_hand_angle);
                 frame.with_save(|f| {
-                    f.translate(Vector::new(2.0, 2.0));
+                    f.translate(Vector::new(0.5, 0.5));
                     let shadow = Color {
                         r: 0.0,
                         g: 0.0,
                         b: 0.0,
-                        a: 0.6,
+                        a: 0.4,
                     };
 
                     f.stroke(
                         &hour_neck,
                         Stroke {
-                            width: hour_neck_width * 1.5,
+                            width: hour_neck_width * 1.2,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
@@ -821,7 +1072,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     f.stroke(
                         &hour_body,
                         Stroke {
-                            width: hour_body_width * 1.5,
+                            width: hour_body_width * 1.2,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
@@ -833,7 +1084,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     &hour_circle,
                     Stroke {
                         width: hour_neck_width,
-                        style: stroke::Style::Solid(palette.text),
+                        style: stroke::Style::Solid(neck_color),
                         ..Stroke::default()
                     },
                 );
@@ -842,7 +1093,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     &hour_neck,
                     Stroke {
                         width: hour_neck_width,
-                        style: stroke::Style::Solid(palette.text),
+                        style: stroke::Style::Solid(neck_color),
                         line_cap: LineCap::Round,
                         ..Stroke::default()
                     },
@@ -852,7 +1103,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     &hour_body,
                     Stroke {
                         width: hour_body_width,
-                        style: stroke::Style::Solid(palette.text),
+                        style: stroke::Style::Solid(neck_color),
                         line_cap: LineCap::Round,
                         ..Stroke::default()
                     },
@@ -894,7 +1145,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     f.stroke(
                         &min_neck,
                         Stroke {
-                            width: min_neck_width * 1.5,
+                            width: min_neck_width * 1.2,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
@@ -904,7 +1155,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     f.stroke(
                         &min_body,
                         Stroke {
-                            width: min_body_width * 1.5,
+                            width: min_body_width * 1.2,
                             style: stroke::Style::Solid(shadow),
                             line_cap: LineCap::Round,
                             ..Stroke::default()
@@ -916,7 +1167,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     &min_circle,
                     Stroke {
                         width: min_neck_width,
-                        style: stroke::Style::Solid(palette.text),
+                        style: stroke::Style::Solid(neck_color),
                         ..Stroke::default()
                     },
                 );
@@ -925,7 +1176,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     &min_neck,
                     Stroke {
                         width: min_neck_width,
-                        style: stroke::Style::Solid(palette.text),
+                        style: stroke::Style::Solid(neck_color),
                         line_cap: LineCap::Round,
                         ..Stroke::default()
                     },
@@ -935,7 +1186,7 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
                     &min_body,
                     Stroke {
                         width: min_body_width,
-                        style: stroke::Style::Solid(palette.text),
+                        style: stroke::Style::Solid(neck_color),
                         line_cap: LineCap::Round,
                         ..Stroke::default()
                     },
@@ -1008,9 +1259,9 @@ impl<'a> canvas::Program<Message> for (&'a Hands, &'a DateTime<Utc>, &'a Option<
 
 #[derive(Default)]
 struct HandsAnimState {
-    hour: std::cell::Cell<f32>,
-    minute: std::cell::Cell<f32>,
-    second: std::cell::Cell<f32>,
+    hour: Cell<f32>,
+    minute: Cell<f32>,
+    second: Cell<f32>,
 }
 
 #[derive(Default)]
@@ -1181,7 +1432,7 @@ impl AnalogueClockCityHalf {
             temp_label,
             stack![
                 self.clock_frame.view(),
-                self.hands.view(time, tz, smooth_tick)
+                self.hands.view(time, tz, smooth_tick, false)
             ],
         ]
         .width(Length::Fill)
@@ -1210,7 +1461,7 @@ impl MinimalClockHalf {
     ) -> Element<'a, Message> {
         stack![
             self.clock_frame.view(),
-            self.hands.view(time, tz, smooth_tick)
+            self.hands.view(time, tz, smooth_tick, false)
         ]
         .into()
     }
@@ -1366,7 +1617,7 @@ impl MinimalClockCityHalf {
             temp_label,
             stack![
                 self.clock_frame.view(),
-                self.hands.view(time, tz, smooth_tick)
+                self.hands.view(time, tz, smooth_tick, false)
             ],
         ]
         .width(Length::Fill)
@@ -1395,7 +1646,7 @@ impl AnalogueRectClockHalf {
     ) -> Element<'a, Message> {
         stack![
             self.clock_frame.view(),
-            self.hands.view(time, tz, smooth_tick)
+            self.hands.view(time, tz, smooth_tick, false)
         ]
         .into()
     }
@@ -1761,7 +2012,7 @@ impl AnalogueRectClockCityHalf {
             temp_label,
             stack![
                 self.clock_frame.view(),
-                self.hands.view(time, tz, smooth_tick)
+                self.hands.view(time, tz, smooth_tick, false)
             ],
         ]
         .width(Length::Fill)
@@ -1791,7 +2042,7 @@ impl AnalogueRectClockFull {
     ) -> Element<'a, Message> {
         stack![
             self.clock_frame.view(time, l10n),
-            self.hands.view(time, tz, smooth_tick)
+            self.hands.view(time, tz, smooth_tick, false)
         ]
         .into()
     }
@@ -2080,6 +2331,250 @@ impl<'a> canvas::Program<Message>
                     });
                 }
             })
+        });
+
+        vec![static_layer]
+    }
+}
+
+pub struct WorldClockHalf {
+    pub clock: [AdaptiveZoneClockHalf; 4],
+    pub tzs: [Option<GeoResult>; 4],
+}
+
+impl WorldClockHalf {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        smooth_tick: bool,
+        theme: &'a Theme,
+    ) -> Element<'a, Message> {
+        responsive(move |size| {
+            let side = size.width.min(size.height);
+            let cell = side / 2.0;
+
+            let c0 = container(self.clock[0].view(time, &self.tzs[0], smooth_tick, size, theme))
+                .width(Length::Fixed(cell))
+                .height(Length::Fixed(cell))
+                .padding(15);
+
+            let c1 = container(self.clock[1].view(time, &self.tzs[1], smooth_tick, size, theme))
+                .width(Length::Fixed(cell))
+                .height(Length::Fixed(cell))
+                .padding(15);
+
+            let c2 = container(self.clock[2].view(time, &self.tzs[2], smooth_tick, size, theme))
+                .width(Length::Fixed(cell))
+                .height(Length::Fixed(cell))
+                .padding(15);
+
+            let c3 = container(self.clock[3].view(time, &self.tzs[3], smooth_tick, size, theme))
+                .width(Length::Fixed(cell))
+                .height(Length::Fixed(cell))
+                .padding(15);
+
+            container(column![row![c0, c1], row![c2, c3]])
+                .width(Length::Fixed(side))
+                .height(Length::Fixed(side))
+                .center(Length::Fill)
+                .into()
+        })
+        .into()
+    }
+}
+
+impl Default for WorldClockHalf {
+    fn default() -> Self {
+        Self {
+            clock: std::array::from_fn(|_| AdaptiveZoneClockHalf::default()),
+            tzs: [
+                Some(GeoResult {
+                    name: String::from("New York"),
+                    latitude: 40.7128,
+                    longitude: -74.0060,
+                    timezone: String::from("America/New_York"),
+                }),
+                Some(GeoResult {
+                    name: String::from("London"),
+                    latitude: 51.5074,
+                    longitude: -0.1278,
+                    timezone: String::from("Europe/London"),
+                }),
+                Some(GeoResult {
+                    name: String::from("Dubai"),
+                    latitude: 25.2048,
+                    longitude: 55.2708,
+                    timezone: String::from("Asia/Dubai"),
+                }),
+                Some(GeoResult {
+                    name: String::from("Tokyo"),
+                    latitude: 35.6762,
+                    longitude: 139.6503,
+                    timezone: String::from("Asia/Tokyo"),
+                }),
+            ],
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct AdaptiveZoneClockHalf {
+    clock_frame: ClockFrameAdaptiveZone,
+    hands: Hands,
+}
+
+impl AdaptiveZoneClockHalf {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<GeoResult>,
+        smooth_tick: bool,
+        size: Size,
+        theme: &'a Theme,
+    ) -> Element<'a, Message> {
+        let wdt = size.width;
+        let hgh = size.height;
+        let scale = (wdt / 960.0).min(hgh / 1080.0);
+
+        let city_name = tz
+            .as_ref()
+            .map(|g| g.name.to_uppercase())
+            .unwrap_or_else(|| String::from("n/a"));
+
+        let city_label = container(
+            text(format!("{:.3}", city_name))
+                .size(scale * 40.0)
+                .color(theme.palette().primary)
+                .height(Length::Fixed(scale * 65.0))
+                .font(SF_PRO_ROUNDED_BLACK),
+        )
+        .padding(padding::top(hgh.min(wdt) / 2.0 - 640.0 * scale))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(Alignment::Center)
+        .align_x(Alignment::Center);
+
+        stack![
+            self.clock_frame.view(time, tz, theme),
+            city_label,
+            self.hands.view(time, tz, smooth_tick, true)
+        ]
+        .into()
+    }
+}
+
+impl ClearCache for AdaptiveZoneClockHalf {
+    fn clear_cache(&self) {
+        self.clock_frame.cache.clear();
+    }
+}
+
+#[derive(Default)]
+pub struct ClockFrameAdaptiveZone {
+    minute: Cell<u32>,
+    is_dark: Cell<bool>,
+    cache: Cache,
+}
+
+impl ClockFrameAdaptiveZone {
+    fn view<'a>(
+        &'a self,
+        time: &'a DateTime<Utc>,
+        tz: &'a Option<GeoResult>,
+        theme: &'a Theme,
+    ) -> Element<'a, Message> {
+        if time.minute() != self.minute.get() {
+            self.minute.set(time.minute());
+            self.cache.clear();
+        };
+
+        canvas((self, time, tz, theme))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+}
+
+impl<'a> canvas::Program<Message>
+    for (
+        &'a ClockFrameAdaptiveZone,
+        &'a DateTime<Utc>,
+        &'a Option<GeoResult>,
+        &'a Theme,
+    )
+{
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let (widget, now, selected_city, theme) = self;
+        let palette = theme.palette();
+
+        let now = if let Some(city) = selected_city {
+            if let Ok(tz) = city.timezone.parse::<Tz>() {
+                now.with_timezone(&tz).fixed_offset()
+            } else {
+                now.with_timezone(&Local).fixed_offset()
+            }
+        } else {
+            now.with_timezone(&Local).fixed_offset()
+        };
+
+        if widget.is_dark.get() != (theme.name() != "classic") {
+            widget.cache.clear();
+        }
+
+        let static_layer = widget.cache.draw(renderer, bounds.size(), |frame| {
+            let center = frame.center();
+
+            frame.translate(Vector::new(center.x, center.y));
+
+            let radius = frame.width().min(frame.height()) / 2.3;
+
+            frame.fill(
+                &Path::circle(Point::ORIGIN, radius * 1.05),
+                if theme.name() == "classic" {
+                    if (now.hour() < 7) || (now.hour() > 20) {
+                        Color::from_rgb8(37, 37, 37)
+                    } else {
+                        Color::from_rgb8(205, 205, 205)
+                    }
+                } else {
+                    palette.background
+                },
+            );
+
+            for hour in 1..=12 {
+                let angle = Radians::from(hand_rotation(hour, 12)) - Radians::from(Degrees(90.0));
+
+                let x = radius * angle.0.cos();
+                let y = radius * angle.0.sin();
+
+                frame.fill_text(canvas::Text {
+                    content: format!("{hour}"),
+                    size: (radius / 4.5).into(),
+                    position: Point::new(x * 0.85, y * 0.85),
+                    color: if theme.name() == "classic" {
+                        if (now.hour() < 7) || (now.hour() > 20) {
+                            palette.text
+                        } else {
+                            Color::BLACK
+                        }
+                    } else {
+                        palette.text
+                    },
+                    align_x: text::Alignment::Center,
+                    align_y: alignment::Vertical::Center,
+                    font: SF_PRO_DISPLAY_MEDIUM,
+                    ..canvas::Text::default()
+                });
+            }
         });
 
         vec![static_layer]

@@ -4,7 +4,7 @@ use crate::weather::GeoResult;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct SavedConfig {
     #[serde(default)]
     pub settings: SavedSettings,
@@ -14,7 +14,7 @@ pub struct SavedConfig {
     pub widgets: Vec<SavedWidgetPrefs>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SavedSettings {
     pub theme_mode: ThemeMode,
     pub theme_dark_at: String,
@@ -39,7 +39,7 @@ impl Default for SavedSettings {
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct SavedCarousels {
     pub page0_left: usize,
     pub page0_right: usize,
@@ -50,6 +50,7 @@ pub struct SavedCarousels {
 pub struct SavedWidgetPrefs {
     pub id: usize,
     pub selected_city: Option<GeoResult>,
+    pub world_cities: Option<[Option<GeoResult>; 4]>,
 }
 
 pub fn config_path() -> PathBuf {
